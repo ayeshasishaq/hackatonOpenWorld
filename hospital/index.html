@@ -59,6 +59,7 @@
 <div id="btns" class="panel">
   <button id="bPredict" class="on">Prediction overlay</button>
   <button id="bTrain">Train on my runs</button>
+  <button id="bRobot">Robot: naive</button>
   <button id="bRestart">Restart</button>
   <button id="bData">Download data</button>
 </div>
@@ -74,6 +75,11 @@
     <div class="r"><span>FDE learned</span><b id="mFdeL" style="color:#5ff3b4">-</b></div>
     <div class="r" style="margin-top:4px"><span>FDE gain</span><b id="mGain" style="color:#5ff3b4">-</b></div>
   </div>
+  <div style="height:1px;background:rgba(120,140,190,.18);margin:9px -14px"></div>
+  <div class="r"><span>robot planner</span><b id="rMode" style="color:#ffc24d">naive</b></div>
+  <div class="r"><span>collisions</span><b id="rHits">0</b></div>
+  <div class="r"><span>time frozen</span><b id="rStall">0.0s</b></div>
+  <div class="r"><span>per minute</span><b id="rRate">-</b></div>
 </div>
 
 <div id="over"></div>
@@ -90,5 +96,6 @@
 <script src="crowd.js"></script>
 <script src="telemetry.js"></script>
 <script src="predict.js"></script>
+<script src="robot.js"></script>
 <script type="module" src="game.js"></script>
 </body></html>

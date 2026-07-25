@@ -196,7 +196,7 @@ const BODY_MAT = {};
 for (const k in KIND_COLOR)
   BODY_MAT[k] = new THREE.MeshStandardMaterial({ color: KIND_COLOR[k], roughness: .75 });
 
-let crowd, crowdMeshes = [];
+let crowd, crowdMeshes = [], lastPreds = null;
 function buildCrowdMeshes() {
   crowdMeshes.forEach(m => scene.remove(m)); crowdMeshes = [];
   crowd.agents.forEach(a => {
@@ -207,6 +207,31 @@ function buildCrowdMeshes() {
     scene.add(g); crowdMeshes.push(g);
   });
 }
+
+// ---------- the autonomous delivery robot ----------
+const robotMesh = new THREE.Group();
+{
+  const shell = new THREE.Mesh(new THREE.CylinderGeometry(.32, .36, .8, 18),
+    new THREE.MeshStandardMaterial({ color: 0x123240, emissive: 0x0a3a47,
+                                     emissiveIntensity: .55, metalness: .35, roughness: .4 }));
+  shell.position.y = .42; shell.castShadow = true; robotMesh.add(shell);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(.22, 16, 12),
+    new THREE.MeshStandardMaterial({ color: 0x0d1c24, roughness: .35 }));
+  head.position.y = .92; robotMesh.add(head);
+  const eye = new THREE.Mesh(new THREE.SphereGeometry(.075, 12, 10),
+    new THREE.MeshBasicMaterial({ color: 0x38e1ff }));
+  eye.position.set(0, .92, .2); robotMesh.add(eye);
+  robotMesh.userData.eye = eye.material;
+  const cargo = new THREE.Mesh(new THREE.BoxGeometry(.4, .16, .3),
+    new THREE.MeshStandardMaterial({ color: 0xe8eef7 }));
+  cargo.position.y = .9; robotMesh.add(cargo);
+}
+scene.add(robotMesh);
+// ring showing what the robot is planning against
+const robotRing = new THREE.Mesh(new THREE.RingGeometry(1.05, 1.2, 36),
+  new THREE.MeshBasicMaterial({ color: 0xffc24d, transparent: true, opacity: .3,
+                               side: THREE.DoubleSide }));
+robotRing.rotation.x = -Math.PI / 2; scene.add(robotRing);
 
 // ---------- prediction overlay ----------
 // PERF: objects are pooled and rewritten in place. Rebuilding geometry every
@@ -295,7 +320,8 @@ let health, running, started, t0, tick, wasHit, stats;
 function reset() {
   crowd = createCrowd(LEVEL, SOLIDS); buildCrowdMeshes();
   bed.x = LEVEL.spawn.x; bed.z = LEVEL.spawn.z; bed.heading = 0; bed.speed = 0;
-  headYaw = 0;
+  headYaw = 0; lastPreds = null;
+  Robot.reset(LEVEL, SOLIDS);
   health = 100; running = true; wasHit = false; tick = 0;
   stats = { hit: 0, miss: 0 }; Telemetry.reset(); t0 = performance.now();
   document.getElementById('over').style.display = 'none';
@@ -350,7 +376,24 @@ function loop() {
     health -= dt * 1.6;                                    // the patient is deteriorating
 
     // ---- prediction overlay (PERF: ~12 Hz, not every frame; it is O(agents^2 * steps)) ----
-    if (tick % 5 === 0) drawPredictions(Predictor.predict(agents, bed));
+    // The robot reuses these same forecasts, so we never compute them twice.
+    if (tick % 5 === 0) { lastPreds = Predictor.predict(agents, bed); drawPredictions(lastPreds); }
+
+    // ---- the robot drives itself through the same crowd ----
+    Robot.step(dt, agents, lastPreds, LEVEL, SOLIDS, Predictor.DT);
+    robotMesh.position.set(Robot.x, 0, Robot.z);
+    if (Math.hypot(Robot.vx, Robot.vz) > .05)
+      robotMesh.rotation.y = Math.atan2(Robot.vx, Robot.vz);
+    robotRing.position.set(Robot.x, .04, Robot.z);
+    const stalled = Math.hypot(Robot.vx, Robot.vz) < .35;
+    robotRing.material.color.setHex(stalled ? 0xff5a5a : (Robot.mode === 'predictive' ? 0x5ff3b4 : 0xffc24d));
+    robotMesh.userData.eye.color.setHex(stalled ? 0xff5a5a : 0x38e1ff);
+    if (tick % 12 === 0) {
+      $('rHits').textContent = Robot.stats.hits;
+      $('rStall').textContent = Robot.stats.stall.toFixed(1) + 's';
+      $('rRate').textContent = Robot.stats.t > 3
+        ? (Robot.stats.hits / (Robot.stats.t / 60)).toFixed(1) + ' hits/min' : '-';
+    }
 
     // ---- log (~10 Hz).  yaw = head orientation, which now differs from travel
     //      direction: exactly the extra signal Human Scene Transformer uses.
@@ -438,6 +481,16 @@ $('bTrain').onclick = () => {
       $('mGain').style.color = gain > 0 ? '#5ff3b4' : '#ffc24d';
       $('mEps').textContent = `${m.episodes} (${m.samples} samples)`;
     });
+};
+// The headline comparison: same controller, same map, only the planning input changes.
+$('bRobot').onclick = () => {
+  Robot.mode = Robot.mode === 'naive' ? 'predictive' : 'naive';
+  Robot.stats = { hits: 0, stall: 0, t: 0 };            // reset so the two are comparable
+  const pred = Robot.mode === 'predictive';
+  $('bRobot').textContent = 'Robot: ' + Robot.mode;
+  $('bRobot').classList.toggle('on', pred);
+  $('rMode').textContent = Robot.mode;
+  $('rMode').style.color = pred ? '#5ff3b4' : '#ffc24d';
 };
 $('bRestart').onclick = () => { reset(); renderer.domElement.requestPointerLock(); };
 $('bData').onclick = () => Telemetry.download();
