@@ -60,6 +60,16 @@
  #over h2{font-size:27px;margin:0 0 6px}
  #over p{color:#8792ad;font-size:14px;margin:3px}
 
+ #card{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);display:none;z-index:41;
+   background:rgba(10,13,21,.98);border:1px solid rgba(120,140,190,.25);border-radius:14px;
+   padding:20px 24px;max-width:min(720px,94vw);max-height:88vh;overflow:auto}
+ #card h3{margin:0 0 4px;font-size:17px}
+ #card h5{margin:14px 0 5px;font-size:11px;letter-spacing:1.3px;color:#5f6b85}
+ #card .kv{display:flex;justify-content:space-between;font-size:12px;padding:2px 0;color:#8792ad;
+   font-family:ui-monospace,Menlo,monospace}
+ #card .kv b{color:#e8edf7;font-weight:500}
+ #card .cite{font-size:11.5px;color:#7c88a2;line-height:1.6}
+ #card canvas{background:rgba(255,255,255,.03);border-radius:6px;margin-top:6px}
  #study{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);display:none;z-index:40;
    background:rgba(10,13,21,.98);border:1px solid rgba(120,140,190,.25);border-radius:14px;
    padding:20px 24px;max-width:min(780px,94vw);max-height:88vh;overflow:auto}
@@ -149,11 +159,20 @@
   <button id="bClone">Clone my driving (C)</button>
   <button id="bWorld">Whole ward on it (V)</button>
   <button id="bTrain">Train crowd predictor (T)</button>
+  <button id="bCard">What was trained? (M)</button>
   <button id="bStudy">Run stratified study</button>
   <button id="bData">Download dataset</button>
 </div>
 
 <div id="over"></div>
+
+<div id="card">
+  <h3>What was actually trained</h3>
+  <p class="sub" style="margin:0 0 12px;max-width:640px">Everything below is measured in this
+    browser, on this run. Nothing is precomputed.</p>
+  <div id="cardBody"></div>
+  <div style="margin-top:12px"><button id="kClose">Close</button></div>
+</div>
 
 <div id="study">
   <h3>Where does prediction actually help?</h3>

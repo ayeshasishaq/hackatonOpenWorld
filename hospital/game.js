@@ -601,6 +601,105 @@ $('bWorld').onclick = () => {
   if (!Policy.trained) return cloneNow();
   setDrive(Policy.drive === 'world' ? 'auto' : 'world');
 };
+// ---- the model card: architecture, data, loss curve, multi-agent evidence ----
+function lossChart(hist, w = 620, h = 130) {
+  if (!hist || !hist.length) return '<div class="cite">no training run yet</div>';
+  const id = 'lc' + Math.random().toString(36).slice(2, 7);
+  setTimeout(() => {
+    const cv = document.getElementById(id); if (!cv) return;
+    const g = cv.getContext('2d'), pad = 26;
+    const all = hist.flatMap(p => [p.train, p.val]).filter(v => isFinite(v));
+    const hi = Math.max(...all), lo = Math.min(...all);
+    const X = i => pad + i / Math.max(1, hist.length - 1) * (w - pad - 8);
+    const Y = v => h - pad - (v - lo) / ((hi - lo) || 1) * (h - pad - 12);
+    g.clearRect(0, 0, w, h);
+    g.strokeStyle = 'rgba(120,140,190,.25)'; g.beginPath();
+    g.moveTo(pad, 8); g.lineTo(pad, h - pad); g.lineTo(w - 8, h - pad); g.stroke();
+    for (const [key, col] of [['train', '#38e1ff'], ['val', '#5ff3b4']]) {
+      g.strokeStyle = col; g.lineWidth = 1.8; g.beginPath();
+      hist.forEach((p, i) => i ? g.lineTo(X(i), Y(p[key])) : g.moveTo(X(i), Y(p[key])));
+      g.stroke();
+    }
+    g.fillStyle = '#5f6b85'; g.font = '10px ui-monospace';
+    g.fillText(hi.toFixed(3), 2, 14); g.fillText(lo.toFixed(3), 2, h - pad);
+    g.fillText('epoch ' + hist[hist.length - 1].epoch, w - 70, h - 8);
+  }, 0);
+  return `<canvas id="${id}" width="${w}" height="${h}"></canvas>
+    <div class="cite"><span style="color:#38e1ff">train</span> ·
+    <span style="color:#5ff3b4">held-out validation</span> · MSE on standardised targets</div>`;
+}
+
+function showCard() {
+  const P = Trainer.metrics, C = Policy.metrics;
+  const kv = (k, v) => `<div class="kv"><span>${k}</span><b>${v}</b></div>`;
+  let h = '';
+
+  h += '<h5>1. CROWD PREDICTOR — where people will be</h5>';
+  if (!P) h += '<div class="cite">not trained yet in this session</div>';
+  else {
+    h += kv('architecture', P.arch);
+    h += kv('input', '27 dims: own velocity, 3 frames of displacement, 4 nearest bodies (rel pos+vel), nearest wall');
+    h += kv('output', '16 dims: 8 future offsets at 0.2 s (1.6 s horizon)');
+    h += kv('training data', `${P.samples} samples from ${P.episodes} logged episode(s), 10 Hz`);
+    h += kv('split', `${P.trainN} train / ${P.valN} held-out`);
+    h += kv('ADE  physics → learned', `${P.adeB.toFixed(3)} → ${P.adeL.toFixed(3)} m`);
+    h += kv('FDE  physics → learned', `${P.fdeB.toFixed(3)} → ${P.fdeL.toFixed(3)} m`);
+    h += lossChart(P.history);
+  }
+
+  h += '<h5>2. CLONED POLICY — what a driver does</h5>';
+  if (!C) h += '<div class="cite">not cloned yet in this session</div>';
+  else {
+    h += kv('architecture', C.arch);
+    h += kv('input', '26 dims, egocentric: own speed, goal bearing, 5 nearest bodies, nearest wall');
+    h += kv('output', '2 dims: throttle, steer');
+    h += kv('training data', `${C.frames} (observation, action) pairs`);
+    h += kv('split', `${C.trainN} train / ${C.valN} held-out`);
+    h += kv('held-out action error', C.err.toFixed(3) + ' (standardised)');
+    h += lossChart(C.history);
+  }
+
+  h += '<h5>3. IS IT REALLY MULTI-AGENT?</h5>';
+  h += `<div class="cite">Every agent runs this policy on its OWN egocentric observation, so it makes its
+    own decision. That is a claim, so here is the test: run the same scene with agents able to see each
+    other, then blinded to each other. Both still decide independently. If contacts rise when blinded,
+    the agents were causally using their neighbours' state.</div>
+    <div style="margin-top:8px"><button id="kMA">Run the ablation</button>
+    <span id="kMAout" class="cite"></span></div>`;
+
+  h += '<h5>4. WHAT IS AND IS NOT FROM A PAPER</h5>';
+  h += `<div class="cite">
+    <b>Implemented here, our own small nets:</b> both MLPs above. They are not reproductions of any
+    paper's architecture.<br>
+    <b>Standard methods we follow:</b> behaviour cloning (Pomerleau 1989; the modern form is pi0,
+    SmolVLA, OpenVLA). Neighbour-conditioned trajectory prediction is the idea behind Social-LSTM
+    (Alahi 2016) and Social GAN (Gupta 2018) — ours is an MLP, not an LSTM or a GAN, so it is inspired
+    by them, not an implementation of them.<br>
+    <b>Baselines and evaluation:</b> constant-velocity is a deliberately strong baseline after
+    Schöller et al. 2020, which showed it beats many deep predictors. ADE/FDE are the standard metrics.
+    Stratifying by density and geometry follows Liu et al., "Beyond ADE and FDE".<br>
+    <b>Diagnoses we cite, not solve:</b> the freezing robot problem (Trautman &amp; Krause 2010);
+    distribution shift in cloning, and the DART/DAgger fixes (Laskey 2017; Ross 2011).<br>
+    <b>Not AI at all, and labelled as such:</b> the robot's potential-field planner, and the default
+    hand-written crowd steering.</div>`;
+
+  $('cardBody').innerHTML = h;
+  $('card').style.display = 'block';
+  const ma = $('kMA');
+  if (ma) ma.onclick = () => {
+    $('kMAout').textContent = ' running…';
+    setTimeout(() => {
+      const r = MultiAgentTest.run(20, 2);
+      $('kMAout').innerHTML = r.error ? ' ' + r.error :
+        ` seeing each other <b style="color:#5ff3b4">${r.seeing.contacts.toFixed(1)}</b> contacts/min ·
+          blinded <b style="color:#ff7a45">${r.blind.contacts.toFixed(1)}</b>/min ·
+          <b>${r.ratio.toFixed(1)}x worse</b> · ${r.seeing.decisions.toLocaleString()} independent decisions`;
+    }, 30);
+  };
+}
+$('bCard').onclick = showCard;
+$('kClose').onclick = () => $('card').style.display = 'none';
+
 $('bNext').onclick = () => Demo.next();
 $('bRestart').onclick = () => { reset(); if (camMode === 'fp') renderer.domElement.requestPointerLock(); };
 $('bAdv').onclick = () => {
@@ -643,6 +742,7 @@ addEventListener('keydown', e => {
   else if (k === 'c') $('bClone').click();
   else if (k === 'v') $('bWorld').click();
   else if (k === 'a') $('bAdv').click();
+  else if (k === 'm') showCard();
   else if (k === 'escape') $('study').style.display = 'none';
 });
 

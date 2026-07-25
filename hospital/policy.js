@@ -96,13 +96,55 @@ const ScriptedDriver = {
   },
 };
 
+// ---------------------------------------------------------------------------
+// PROOF THAT IT IS MULTI-AGENT.
+// Claiming "every agent runs its own policy" is not evidence. This runs the same
+// scene twice: once with each agent able to observe its neighbours, once blinded
+// to them. Each agent still decides independently in both. If agent-agent
+// collisions rise sharply when blinded, the agents were causally using each
+// other's state, which is the thing that makes it multi-agent.
+// ---------------------------------------------------------------------------
+const MultiAgentTest = {
+  run(seconds, trials) {
+    if (!Policy.trained) return { error: 'clone a policy first' };
+    const out = {};
+    for (const blind of [false, true]) {
+      Policy.blind = blind;
+      let contacts = 0, t = 0, decisions = 0;
+      for (let k = 0; k < trials; k++) {
+        const c = createCrowd(LEVEL, []);
+        const saved = Policy.drive; Policy.drive = 'world';
+        const dt = 1 / 30;
+        for (let i = 0; i < seconds * 30; i++) {
+          const ag = c.step(dt); t += dt; decisions += ag.length;
+          for (let a = 0; a < ag.length; a++)
+            for (let b = a + 1; b < ag.length; b++)
+              if (Math.hypot(ag[a].x - ag[b].x, ag[a].z - ag[b].z) < ag[a].r + ag[b].r) contacts++;
+        }
+        Policy.drive = saved;
+      }
+      out[blind ? 'blind' : 'seeing'] = { contacts: contacts / (t / 60), decisions };
+    }
+    Policy.blind = false;
+    out.ratio = out.seeing.contacts > 0 ? out.blind.contacts / out.seeing.contacts : Infinity;
+    return out;
+  },
+};
+
 const Policy = {
-  net: null, norm: null, trained: false, busy: false, metrics: null,
+  net: null, norm: null, trained: false, busy: false, metrics: null, history: [],
   drive: 'human',                 // 'human' | 'auto' | 'world'  (world = every agent)
+  blind: false,                   // ablation: hide neighbours from every agent
+  calls: 0,                       // policy evaluations, for the multi-agent readout
 
   act(e, others, goal, walls) {
     if (!this.net) return { throttle: 0, steer: 0 };
-    const f = policyObs(e, others, goal, walls), n = this.norm;
+    this.calls++;
+    // ABLATION: with `blind` on, each agent still runs its own policy but can no
+    // longer see the others. If collisions spike, the agents were genuinely
+    // deciding from their neighbours' state, which is what makes this multi-agent
+    // rather than N independent goal-seekers that happen to share a room.
+    const f = policyObs(e, this.blind ? [] : others, goal, walls), n = this.norm;
     const x = new Float32Array(P_IN);
     for (let i = 0; i < P_IN; i++) x[i] = (f[i] - n.xm[i]) / n.xs[i];
     const a = forward(this.net, x), o = a[a.length - 1];
@@ -154,10 +196,20 @@ const Policy = {
 
     const EPOCHS = 60;
     let epoch = 0;
+    this.history = [];                  // per-epoch train/val loss, so the curve is inspectable
+    const mse = (from, to) => {
+      let s = 0, m = 0;
+      for (let k = from; k < to; k++) {
+        const a = forward(net, Xn[idx[k]]), o = a[a.length - 1], y = Yn[idx[k]];
+        s += (o[0] - y[0]) ** 2 + (o[1] - y[1]) ** 2; m++;
+      }
+      return s / (m * 2);
+    };
     const step = () => {
       for (let e = 0; e < 4 && epoch < EPOCHS; e++, epoch++) {
         const lr = .008 * (1 - epoch / EPOCHS) + .0004;
         for (let k = 0; k < split; k++) backward(net, forward(net, Xn[idx[k]]), Yn[idx[k]], lr);
+        this.history.push({ epoch, train: mse(0, Math.min(split, 400)), val: mse(split, n) });
       }
       onProgress(epoch / EPOCHS);
       if (epoch < EPOCHS) return setTimeout(step, 0);
@@ -167,7 +219,8 @@ const Policy = {
         const a = forward(net, Xn[idx[k]]), o = a[a.length - 1];
         err += Math.hypot(o[0] - Yn[idx[k]][0], o[1] - Yn[idx[k]][1]); m++;
       }
-      this.metrics = { frames: n, err: err / m };
+      this.metrics = { frames: n, err: err / m, trainN: split, valN: n - split,
+                       arch: `${P_IN}-64-64-${P_OUT} MLP, ReLU, Adam`, history: this.history };
       this.busy = false;
       onDone(this.metrics);
     };

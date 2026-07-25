@@ -262,6 +262,16 @@ const Trainer = {
 
     const EPOCHS = 35;                 // enough to converge, keeps the live demo short
     let epoch = 0;
+    this.history = [];                 // per-epoch train/val loss, so the curve is inspectable
+    const mse = (from, to) => {
+      let s = 0, m = 0;
+      for (let k = from; k < to; k++) {
+        const a = forward(net, Xn[idx[k]]), o = a[a.length - 1], y = Yn[idx[k]];
+        for (let i = 0; i < OUT_DIM; i++) s += (o[i] - y[i]) ** 2;
+        m++;
+      }
+      return s / (m * OUT_DIM);
+    };
     const step = () => {
       for (let e = 0; e < 3 && epoch < EPOCHS; e++, epoch++) {          // 3 epochs per frame
         const lr = .01 * (1 - epoch / EPOCHS) + .0005;
@@ -269,6 +279,7 @@ const Trainer = {
           const s = idx[k];
           backward(net, forward(net, Xn[s]), Yn[s], lr);
         }
+        this.history.push({ epoch, train: mse(0, Math.min(split, 400)), val: mse(split, n) });
       }
       onProgress(epoch / EPOCHS);
       if (epoch < EPOCHS) return setTimeout(step, 0);   // setTimeout: keeps going if the tab blurs
@@ -300,6 +311,9 @@ const Trainer = {
       this.metrics = {
         samples: n, episodes: this.episodes.length,
         adeL: adeL / m, fdeL: fdeL / m, adeB: adeB / m, fdeB: fdeB / m,
+        arch: `${IN_DIM}-48-48-${OUT_DIM} MLP, ReLU, Adam`,
+        train: n - (n - split), trainN: split, valN: n - split,
+        history: this.history,
       };
       Predictor.mode = 'learned';
       Predictor.name = `learned MLP (ADE ${this.metrics.adeL.toFixed(2)} m)`;
