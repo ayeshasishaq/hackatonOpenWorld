@@ -77,6 +77,10 @@
     <button id="newgoal">New goal Y</button>
     <button id="topview">Top view</button>
   </div>
+  <div class="row">
+    <button id="mode">Drive: Auto</button>
+    <button id="download">Download run</button>
+  </div>
 
   <div class="slider"><label>Guests <b id="vCrowd">14</b></label>
     <input id="crowd" type="range" min="0" max="30" value="14"></div>
@@ -113,7 +117,7 @@
   <div class="k"><span class="dot" style="background:var(--cyan)"></span>robot</div>
 </div>
 
-<div id="hint">Drag to orbit · scroll to zoom · <b class="tip">click the floor</b> to move goal Y</div>
+<div id="hint">Drag to orbit · scroll to zoom · <b class="tip">click the floor</b> to move goal Y · <b class="tip">Drive: Manual</b> then WASD to steer</div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
@@ -303,12 +307,20 @@ function footprint(h){
 let params={crowd:14,drink:1,speed:1.5,caution:1.0};
 let show={fields:true,sense:true,trail:true};
 let playing=true;
+// --- manual drive + telemetry (added for human-vs-auto data collection) ---
+let manual=false;
+const keys={};
+addEventListener('keydown',e=>{const k=e.key.toLowerCase();
+  if(['arrowup','arrowdown','arrowleft','arrowright'].includes(k))e.preventDefault(); keys[k]=true;});
+addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
+const runLog=[]; let logFrame=0;
 let stats={time:0,miss:0,hit:0,dodge:0};
 let hitCooldown=0, dodgeCooldown=0;
 
 function resetSim(){
   robot.pos={...START}; robot.vel=v2(0,0); robot.reached=false;
   stats={time:0,miss:0,hit:0,dodge:0}; hitCooldown=0; dodgeCooldown=0; trailN=0;
+  runLog.length=0; logFrame=0;
   for(const h of humans){ h.mood=rand(0,.15); h.falling=false; h.phase='up'; h.fallLen=0;
     h.pos=v2(rand(-HX+1,HX-1),rand(-HZ+1,HZ-1)); h.way=v2(rand(-HX+1,HX-1),rand(-HZ+1,HZ-1)); }
   setStatus('Navigating','');
@@ -405,9 +417,20 @@ function updateHuman(h,dt){
 function updateRobot(dt){
   if(robot.reached){ robot.vel=clampLen(robot.vel,0); return; }
   const p=robot.pos;
+  let force, maxV=params.speed, emergency=false, nearestFall=null, nfd=1e9;
+  if(manual){
+    // HUMAN DRIVES: steer with WASD / arrows; the person does the avoiding.
+    const ix=(keys['d']||keys['arrowright']?1:0)-(keys['a']||keys['arrowleft']?1:0);
+    const iz=(keys['s']||keys['arrowdown']?1:0)-(keys['w']||keys['arrowup']?1:0);
+    force=mul(v2(ix,iz),3.2);
+    for(const ob of obstacles){ const d=sub(p,v2(ob.x,ob.z)),l=len(d),safe=ob.r+R_ROBOT+.3;
+      if(l<safe&&l>.01) force=add(force,mul(norm(d),((safe-l)/safe)*2.2)); }
+    const wpm=(edge,axis,sign)=>{const dist=edge-sign*p[axis]; if(dist<1.0){
+      const f=v2(0,0); f[axis]=-sign*((1.0-dist)/1.0)*2.6; force=add(force,f);}};
+    wpm(HX,'x',1); wpm(HX,'x',-1); wpm(HZ,'z',1); wpm(HZ,'z',-1);
+  } else {
   // attraction to goal
-  let force=mul(norm(sub(GOAL,p)),1.6);
-  let emergency=false, nearestFall=null, nfd=1e9;
+  force=mul(norm(sub(GOAL,p)),1.6);
 
   for(const h of humans){
     // predict a little ahead for moving people (velocity-obstacle flavour)
@@ -436,7 +459,6 @@ function updateRobot(dt){
   wallPush(HX,'x',1); wallPush(HX,'x',-1); wallPush(HZ,'z',1); wallPush(HZ,'z',-1);
 
   // emergency: hard lateral dodge away from the nearest faller + brake
-  let maxV=params.speed;
   if(emergency&&nearestFall){
     const toH=norm(sub(nearestFall.pos,p));
     // pick perpendicular side that moves away from the fall lunge
@@ -447,6 +469,7 @@ function updateRobot(dt){
     maxV=params.speed*1.25; // allowed to scoot faster to escape
     if(dodgeCooldown<=0){stats.dodge++;dodgeCooldown=1.5;}
   }
+  } // end auto-navigation branch
 
   // integrate
   const desired=clampLen(force,maxV);
@@ -474,7 +497,7 @@ function updateRobot(dt){
   // reached?
   if(len(sub(GOAL,robot.pos))<0.7){ robot.reached=true; setStatus('Reached Y','reached'); }
   else if(emergency) setStatus('Emergency dodge','emergency');
-  else setStatus('Navigating','');
+  else setStatus(manual?'Manual drive · WASD':'Navigating','');
 
   robot._nearest=nearest; robot._emergency=emergency;
 }
@@ -520,6 +543,15 @@ function frame(now){
     stats.time+=dt;
     for(const h of humans) updateHuman(h,dt);
     updateRobot(dt);
+    if(++logFrame%3===0) runLog.push({
+      t:+stats.time.toFixed(2), mode:manual?'human':'auto',
+      rx:+robot.pos.x.toFixed(2), rz:+robot.pos.z.toFixed(2),
+      vx:+robot.vel.x.toFixed(2), vz:+robot.vel.z.toFixed(2),
+      gx:+GOAL.x.toFixed(2), gz:+GOAL.z.toFixed(2),
+      nearest:+(robot._nearest??9).toFixed(2),
+      hit:stats.hit, miss:stats.miss, dodge:stats.dodge,
+      humans:humans.map(h=>[+h.pos.x.toFixed(2),+h.pos.z.toFixed(2),+h.mood.toFixed(2),h.falling?1:0])
+    });
   }
   syncMeshes(); updateHud();
   renderer.render(scene,camera);
@@ -536,6 +568,11 @@ $('newgoal').onclick=()=>{ let x,z,ok,t=0; do{x=rand(-HX+1,HX-1);z=rand(-HZ+1,HZ
   for(const o of obstacles) if(Math.hypot(x-o.x,z-o.z)<o.r+.5) ok=false;}while(!ok&&t<40);
   GOAL=v2(x,z); robot.reached=false; setStatus('Navigating',''); };
 $('topview').onclick=()=>{ camAz=Math.PI*0.5; camPolar=0.12; camR=22; updateCam(); };
+$('mode').onclick=()=>{ manual=!manual; $('mode').textContent='Drive: '+(manual?'Manual':'Auto');
+  $('mode').classList.toggle('on',manual); robot.reached=false; };
+$('download').onclick=()=>{ const blob=new Blob([JSON.stringify(runLog)],{type:'application/json'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download=(manual?'human':'auto')+'_run.json'; a.click(); };
 $('tDrop').onclick=()=>{ // force the nearest sober-enough person to topple toward the robot
   let best=null,bd=1e9; for(const h of humans){ if(h.falling)continue;
     const d=Math.hypot(h.pos.x-robot.pos.x,h.pos.z-robot.pos.z); if(d<bd){bd=d;best=h;} }
