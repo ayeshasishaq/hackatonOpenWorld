@@ -7,8 +7,8 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 // ---------- renderer / scene ----------
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));   // PERF: retina at 2x quadruples fill cost
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.body.appendChild(renderer.domElement);
@@ -23,17 +23,22 @@ addEventListener('resize', () => {
 });
 
 // ---------- lights ----------
-scene.add(new THREE.HemisphereLight(0x4a5a7a, 0x0a0c14, 0.75));
-const key = new THREE.DirectionalLight(0xffffff, 0.55);
+// PERF: every extra light costs per-fragment shading. Lifted the cheap ambient
+// and cut the point lights from 9 to 3; the emissive strips still read as lit.
+scene.add(new THREE.HemisphereLight(0x6274a0, 0x11141c, 1.35));
+const key = new THREE.DirectionalLight(0xffffff, 0.75);
 key.position.set(6, 20, 8); key.castShadow = true;
-key.shadow.mapSize.set(2048, 2048);
+key.shadow.mapSize.set(1024, 1024);
 Object.assign(key.shadow.camera, { left: -22, right: 22, top: 26, bottom: -26, near: 1, far: 60 });
 scene.add(key);
-// ceiling strip lights down the corridor
-for (let z = -18; z <= 18; z += 6) {
-  const l = new THREE.PointLight(0xbfd8ff, 26, 16, 2); l.position.set(0, 4.2, z); scene.add(l);
-  const s = new THREE.Mesh(new THREE.BoxGeometry(2.4, .1, .3),
-    new THREE.MeshBasicMaterial({ color: 0xdce9ff })); s.position.set(0, 4.3, z); scene.add(s);
+// ceiling strips: emissive-only (free), with just two real lights for depth
+const stripGeo = new THREE.BoxGeometry(2.4, .1, .3);
+const stripMat = new THREE.MeshBasicMaterial({ color: 0xdce9ff });
+for (let z = -18; z <= 18; z += 4.5) {
+  const s = new THREE.Mesh(stripGeo, stripMat); s.position.set(0, 4.3, z); scene.add(s);
+}
+for (const z of [10, -4]) {
+  const l = new THREE.PointLight(0xbfd8ff, 34, 22, 2); l.position.set(0, 4.2, z); scene.add(l);
 }
 const orLight = new THREE.PointLight(0x5ff3b4, 90, 26, 2);
 orLight.position.set(LEVEL.goal.x, 4, LEVEL.goal.z); scene.add(orLight);
@@ -64,63 +69,188 @@ const goalBeam = new THREE.Mesh(
   new THREE.MeshBasicMaterial({ color: 0x5ff3b4, transparent: true, opacity: .07, side: THREE.DoubleSide }));
 goalBeam.position.set(LEVEL.goal.x, 4, LEVEL.goal.z); scene.add(goalBeam);
 
-// ---------- the gurney you push (visible in front of the camera) ----------
+// ---------- the gurney + the patient on it ----------
+// You push from the HEAD end (as staff really do), so the patient's face is
+// nearest you and their feet lead. Local +z = toward you, -z = direction of travel.
 const gurney = new THREE.Group();
+const P = {};                                   // patient parts we animate
 {
-  const frame = new THREE.Mesh(new THREE.BoxGeometry(1.0, .12, 2.0),
-    new THREE.MeshStandardMaterial({ color: 0xcfd8e8, metalness: .5, roughness: .35 }));
-  frame.position.y = .78; gurney.add(frame);
-  const body = new THREE.Mesh(new THREE.CapsuleGeometry(.28, 1.0, 4, 10),
-    new THREE.MeshStandardMaterial({ color: 0x8fa8c8 }));
-  body.rotation.x = Math.PI / 2; body.position.set(0, .98, -.1); gurney.add(body);
-  const blanket = new THREE.Mesh(new THREE.BoxGeometry(.9, .1, 1.1),
-    new THREE.MeshStandardMaterial({ color: 0x2f6fbf })); blanket.position.set(0, .93, .2); gurney.add(blanket);
+  const mat = (c, o = {}) => new THREE.MeshStandardMaterial({ color: c, roughness: .8, ...o });
+  const skin  = mat(0xd9a88a);                  // mutated by updatePatient (pallor)
+  const gown  = mat(0xcfe0ee, { roughness: .95 });
+  const steel = mat(0xcfd8e8, { metalness: .55, roughness: .3 });
+  P.skin = skin;
+
+  // --- trolley ---
+  const frame = new THREE.Mesh(new THREE.BoxGeometry(1.0, .12, 2.0), steel);
+  frame.position.y = .78; frame.castShadow = true; gurney.add(frame);
+  const mattress = new THREE.Mesh(new THREE.BoxGeometry(.94, .14, 1.94), mat(0x33405a));
+  mattress.position.y = .9; gurney.add(mattress);
   for (const [dx, dz] of [[-.42, -.85], [.42, -.85], [-.42, .85], [.42, .85]]) {
-    const w = new THREE.Mesh(new THREE.CylinderGeometry(.1, .1, .07, 12),
-      new THREE.MeshStandardMaterial({ color: 0x222833 }));
+    const w = new THREE.Mesh(new THREE.CylinderGeometry(.1, .1, .07, 12), mat(0x1a1f29));
     w.rotation.z = Math.PI / 2; w.position.set(dx, .12, dz); gurney.add(w);
   }
+  for (const dx of [-.46, .46]) {               // side rails
+    const r = new THREE.Mesh(new THREE.BoxGeometry(.05, .05, 1.1), steel);
+    r.position.set(dx, 1.12, -.1); gurney.add(r);
+    for (const dz of [-.6, .4]) {
+      const post = new THREE.Mesh(new THREE.BoxGeometry(.05, .22, .05), steel);
+      post.position.set(dx, 1.0, dz); gurney.add(post);
+    }
+  }
+
+  // --- body, lying supine ---
+  const seg = (r, len, m) => {
+    const s = new THREE.Mesh(new THREE.CapsuleGeometry(r, len, 4, 10), m);
+    s.rotation.x = Math.PI / 2; s.castShadow = true; return s;
+  };
+  P.chest = seg(.2, .42, gown);  P.chest.position.set(0, 1.0, .26);  gurney.add(P.chest);
+  const belly = seg(.18, .28, gown); belly.position.set(0, .99, -.08); gurney.add(belly);
+  const hips  = seg(.19, .12, gown); hips.position.set(0, .98, -.32);  gurney.add(hips);
+
+  P.head = new THREE.Group(); P.head.position.set(0, 1.02, .74); gurney.add(P.head);
+  const skull = new THREE.Mesh(new THREE.SphereGeometry(.135, 18, 14), skin);
+  skull.scale.set(1, .95, 1.12); skull.castShadow = true; P.head.add(skull);
+  // hair caps the crown and the back of the skull, never the face (the face points up)
+  const hair = new THREE.Mesh(new THREE.SphereGeometry(.142, 16, 12,
+    0, Math.PI * 2, 0, Math.PI * .5), mat(0x2b2119));
+  hair.rotation.x = Math.PI * .62; hair.position.set(0, -.01, .01); P.head.add(hair);
+  // face points up: clenched eyes, drawn brows, mouth open in a gasp
+  for (const sx of [-1, 1]) {
+    const eye = new THREE.Mesh(new THREE.BoxGeometry(.055, .012, .016), mat(0x241c14));
+    eye.position.set(sx * .058, .122, .04); P.head.add(eye);
+    const brow = new THREE.Mesh(new THREE.BoxGeometry(.06, .016, .018), mat(0x241c14));
+    brow.position.set(sx * .06, .13, .078); brow.rotation.y = sx * .4; P.head.add(brow);
+  }
+  P.mouth = new THREE.Mesh(new THREE.SphereGeometry(.042, 12, 10), mat(0x2e1010));
+  P.mouth.scale.set(1, .5, .7); P.mouth.position.set(0, .118, -.055); P.head.add(P.mouth);
+  const mask = new THREE.Mesh(new THREE.SphereGeometry(.075, 14, 12),
+    new THREE.MeshStandardMaterial({ color: 0xdff1f7, transparent: true, opacity: .32,
+                                     roughness: .25 }));
+  mask.scale.set(1, .6, .85); mask.position.set(0, .1, -.02); P.head.add(mask);
+
+  // arms: one across the chest clutching the wound, one at the side
+  P.armL = new THREE.Group(); P.armL.position.set(-.24, 1.02, .34); gurney.add(P.armL);
+  const upL = seg(.055, .2, skin); upL.position.set(0, 0, -.12); P.armL.add(upL);
+  const foreL = seg(.05, .2, skin); foreL.position.set(.1, .06, -.32);
+  foreL.rotation.y = .7; P.armL.add(foreL);
+  P.armR = new THREE.Group(); P.armR.position.set(.26, 1.0, .3); gurney.add(P.armR);
+  const upR = seg(.055, .22, skin); upR.position.set(0, 0, -.14); P.armR.add(upR);
+
+  // legs under a blanket
+  for (const sx of [-1, 1]) {
+    const thigh = seg(.085, .26, gown); thigh.position.set(sx * .12, .98, -.58); gurney.add(thigh);
+    const shin  = seg(.07, .26, skin);  shin.position.set(sx * .12, .96, -.9);   gurney.add(shin);
+  }
+  const blanket = new THREE.Mesh(new THREE.BoxGeometry(.86, .1, .95), mat(0x2f5fa8, { roughness: 1 }));
+  blanket.position.set(0, 1.02, -.62); gurney.add(blanket);
+
+  // trauma: blood-soaked dressing on the abdomen
+  P.wound = new THREE.Mesh(new THREE.BoxGeometry(.26, .03, .2), mat(0xf2f4f6));
+  P.wound.position.set(.02, 1.14, -.02); gurney.add(P.wound);
+  const blood = new THREE.Mesh(new THREE.CircleGeometry(.085, 14), mat(0x8e1414, { roughness: .55 }));
+  blood.rotation.x = -Math.PI / 2; blood.position.set(.03, 1.157, -.02); gurney.add(blood);
+  P.blood = blood;
+
+  // IV pole with a drip bag, and a monitor LED that pulses with the heart rate
+  // set well forward and to the side so it never blocks the view of the patient
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(.018, .018, 1.25, 8), steel);
+  pole.position.set(.5, 1.5, -.55); gurney.add(pole);
+  const bag = new THREE.Mesh(new THREE.BoxGeometry(.13, .19, .06),
+    new THREE.MeshStandardMaterial({ color: 0xe8f4ff, transparent: true, opacity: .8 }));
+  bag.position.set(.5, 2.0, -.55); gurney.add(bag);
+  P.led = new THREE.Mesh(new THREE.SphereGeometry(.028, 10, 8),
+    new THREE.MeshBasicMaterial({ color: 0xff3b3b }));
+  P.led.position.set(.5, 2.15, -.55); gurney.add(P.led);
 }
 scene.add(gurney);
 
+// Distress rises as vitals fall: faster shallow breathing, harder head-rolling,
+// sharper spasms, trembling and pallor when critical.
+function updatePatient(t, health) {
+  const d = 1 - Math.max(0, Math.min(1, health / 100));      // 0 = stable, 1 = critical
+  const breathe = Math.sin(t * (1.1 + d * 2.6) * Math.PI * 2);
+  P.chest.scale.set(1, 1 + breathe * (.05 + d * .06), 1 + breathe * .03);
+  P.head.rotation.z = Math.sin(t * (.7 + d * 1.9)) * (.05 + d * .3);   // rolling in pain
+  // head tilted back on the pillow (airway open, gasping) so the face reads from behind
+  P.head.rotation.x = .5 + Math.sin(t * 1.3) * .05 + d * .12;
+  const spasm = Math.pow(Math.max(0, Math.sin(t * .8)), 14);           // sharp periodic wince
+  P.armL.rotation.x = -spasm * (.35 + d * .9);
+  P.armR.rotation.x = spasm * (.15 + d * .4);
+  P.mouth.scale.set(1, .5 + d * .9, .7);                              // gasping
+  P.shakeX = d > .55 ? (Math.random() - .5) * .008 * d : 0;           // tremor offset
+  P.shakeY = d > .55 ? (Math.random() - .5) * .006 * d : 0;
+  P.skin.color.setHSL(.07, .42 - d * .3, .62 - d * .14);              // goes pale
+  P.blood.scale.setScalar(1 + d * .5);
+  P.led.material.color.setHex(Math.sin(t * (2 + d * 4) * Math.PI * 2) > .4 ? 0xff3b3b : 0x400d0d);
+}
+
 // ---------- crowd meshes ----------
 const KIND_COLOR = { nurse: 0x5fb0f3, patient: 0xd8dce6, rusher: 0xffc24d };
+// PERF: one geometry + one material per kind, shared by every agent, built once.
+// (Previously each of the 22 agents allocated its own, on every reset.)
+const BODY_GEO = new THREE.CapsuleGeometry(.26, .95, 3, 8);
+const HEAD_GEO = new THREE.SphereGeometry(.2, 10, 8);
+const HEAD_MAT = new THREE.MeshStandardMaterial({ color: 0xe7d3bd, roughness: .8 });
+const BODY_MAT = {};
+for (const k in KIND_COLOR)
+  BODY_MAT[k] = new THREE.MeshStandardMaterial({ color: KIND_COLOR[k], roughness: .75 });
+
 let crowd, crowdMeshes = [];
 function buildCrowdMeshes() {
   crowdMeshes.forEach(m => scene.remove(m)); crowdMeshes = [];
   crowd.agents.forEach(a => {
     const g = new THREE.Group();
-    const body = new THREE.Mesh(new THREE.CapsuleGeometry(.26, .95, 4, 10),
-      new THREE.MeshStandardMaterial({ color: KIND_COLOR[a.kind] || 0x9aa4b8, roughness: .7 }));
-    body.position.y = .78; body.castShadow = true; g.add(body);
-    const head = new THREE.Mesh(new THREE.SphereGeometry(.2, 16, 12),
-      new THREE.MeshStandardMaterial({ color: 0xe7d3bd })); head.position.y = 1.5; g.add(head);
+    const body = new THREE.Mesh(BODY_GEO, BODY_MAT[a.kind] || BODY_MAT.patient);
+    body.position.y = .78; g.add(body);          // no castShadow: 22 shadow casters is costly
+    const head = new THREE.Mesh(HEAD_GEO, HEAD_MAT); head.position.y = 1.5; g.add(head);
     scene.add(g); crowdMeshes.push(g);
   });
 }
 
 // ---------- prediction overlay ----------
+// PERF: objects are pooled and rewritten in place. Rebuilding geometry every
+// frame (the old approach) allocated ~66 geometries/materials per frame and
+// never disposed them, which was the main source of stutter.
 const predGroup = new THREE.Group(); scene.add(predGroup);
 let showPredict = true;
+const PRED_POOL = [];
+const DOT_GEO = new THREE.SphereGeometry(.1, 8, 6);
+function predSlot(i, steps) {
+  if (!PRED_POOL[i]) {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(steps * 3), 3));
+    const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ transparent: true }));
+    const dot = new THREE.Mesh(DOT_GEO, new THREE.MeshBasicMaterial({ transparent: true }));
+    line.frustumCulled = false; predGroup.add(line, dot);
+    PRED_POOL[i] = { line, dot };
+  }
+  return PRED_POOL[i];
+}
+function hidePredictions() {
+  for (const s of PRED_POOL) if (s) { s.line.visible = false; s.dot.visible = false; }
+}
 function drawPredictions(preds) {
-  predGroup.clear();
+  hidePredictions();
   if (!showPredict) return;
-  for (const p of preds) {
-    const pts = p.path.map(q => new THREE.Vector3(q.x, .1 + p.risk * .05, q.z));
-    const col = new THREE.Color().setHSL(0.42 - 0.42 * p.risk, .9, .55);   // green -> red
-    predGroup.add(new THREE.Line(
-      new THREE.BufferGeometry().setFromPoints(pts),
-      new THREE.LineBasicMaterial({ color: col, transparent: true, opacity: .25 + p.risk * .7 })));
-    const end = p.path[p.path.length - 1];
-    const dot = new THREE.Mesh(new THREE.SphereGeometry(.09 + p.risk * .1, 10, 8),
-      new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: .5 + p.risk * .5 }));
-    dot.position.set(end.x, .12, end.z); predGroup.add(dot);
-    if (p.risk > .55) {                                   // warning ring on the floor
-      const ring = new THREE.Mesh(new THREE.RingGeometry(.5, .68, 24),
-        new THREE.MeshBasicMaterial({ color: 0xff5a5a, transparent: true, opacity: p.risk * .7,
-                                      side: THREE.DoubleSide }));
-      ring.rotation.x = -Math.PI / 2; ring.position.set(end.x, .06, end.z); predGroup.add(ring);
+  for (let i = 0; i < preds.length; i++) {
+    const p = preds[i], s = predSlot(i, p.path.length);
+    const arr = s.line.geometry.attributes.position.array;
+    for (let k = 0; k < p.path.length; k++) {
+      arr[k * 3] = p.path[k].x; arr[k * 3 + 1] = .1; arr[k * 3 + 2] = p.path[k].z;
     }
+    s.line.geometry.attributes.position.needsUpdate = true;
+    s.line.geometry.setDrawRange(0, p.path.length);
+    const hue = .42 - .42 * p.risk;                       // green -> red by collision risk
+    s.line.material.color.setHSL(hue, .9, .55);
+    s.line.material.opacity = .25 + p.risk * .7;
+    s.line.visible = true;
+    const end = p.path[p.path.length - 1];
+    s.dot.position.set(end.x, .12, end.z);
+    s.dot.scale.setScalar(.7 + p.risk * 1.6);
+    s.dot.material.color.setHSL(hue, .9, .55);
+    s.dot.material.opacity = .5 + p.risk * .5;
+    s.dot.visible = true;
   }
 }
 
@@ -128,7 +258,7 @@ function drawPredictions(preds) {
 // You push from behind. Wheels only steer while rolling, so it handles like a real trolley.
 const MAX_FWD = 3.6, MAX_REV = 1.2, ACCEL = 6.0, DRAG = 1.8, TURN = 2.2;
 const BED_R = .5, BED_HALF = .9;          // trolley = capsule: radius + half its length
-const PUSH = 1.7, EYE = 1.6, PITCH = -0.1;
+const PUSH = 2.45, EYE = 1.88, PITCH = -0.24;   // stand back and look down on the patient
 const bed = { x: LEVEL.spawn.x, z: LEVEL.spawn.z, heading: 0, speed: 0 };  // heading 0 = -z, toward the OR
 let headYaw = 0;                          // mouse look, decoupled from where the bed points
 camera.rotation.order = 'YXZ';
@@ -219,8 +349,8 @@ function loop() {
     wasHit = collided;
     health -= dt * 1.6;                                    // the patient is deteriorating
 
-    // ---- prediction overlay ----
-    drawPredictions(Predictor.predict(agents, bed));
+    // ---- prediction overlay (PERF: ~12 Hz, not every frame; it is O(agents^2 * steps)) ----
+    if (tick % 5 === 0) drawPredictions(Predictor.predict(agents, bed));
 
     // ---- log (~10 Hz).  yaw = head orientation, which now differs from travel
     //      direction: exactly the extra signal Human Scene Transformer uses.
@@ -249,7 +379,8 @@ function loop() {
   const cfx = -Math.sin(bed.heading), cfz = -Math.cos(bed.heading);
   camera.position.set(bed.x - cfx * PUSH, EYE, bed.z - cfz * PUSH);
   camera.rotation.set(PITCH, bed.heading + headYaw, 0);
-  gurney.position.set(bed.x, 0, bed.z);
+  updatePatient(clock.elapsedTime, health);     // breathing / pain, before we place the rig
+  gurney.position.set(bed.x + (P.shakeX || 0), P.shakeY || 0, bed.z);
   gurney.rotation.y = bed.heading;
   goalDisc.rotation.y += dt * .6;
 
@@ -284,7 +415,7 @@ $('bData').onclick = () => Telemetry.download();
 $('bPredict').onclick = () => {
   showPredict = !showPredict;
   $('bPredict').classList.toggle('on', showPredict);
-  if (!showPredict) predGroup.clear();
+  if (!showPredict) hidePredictions();     // hide, never clear: the pool owns these objects
 };
 $('start').onclick = () => {
   $('start').style.display = 'none'; started = true;
