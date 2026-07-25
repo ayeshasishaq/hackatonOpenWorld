@@ -122,40 +122,34 @@
     <div class="r" style="margin-top:9px"><span>runs logged</span><b id="dEps">0</b></div>
     <div class="r"><span>trajectory rows</span><b id="dRows">0</b></div>
   </div>
-  <!-- ACT 3 : the cloned policy -->
+  <!-- BEAT 3 : the cloned policy, with its training curve shown inline -->
   <div id="p_clone" style="display:none">
     <h4>CLONED POLICY</h4>
-    <div class="big" id="cBig">not trained</div>
-    <div class="sub" id="cSub">Behaviour cloning on your own (observation, action) pairs.</div>
-    <div class="r" style="margin-top:9px"><span>demo frames</span><b id="cFrames">0</b></div>
-    <div class="r"><span>driving</span><b id="cDrive">human</b></div>
+    <div class="big" id="cBig">training…</div>
+    <div class="sub" id="cSub">Behaviour cloning on those (observation, action) pairs.</div>
+    <canvas id="cCurve" width="222" height="58" style="margin-top:8px;background:rgba(255,255,255,.03);border-radius:5px"></canvas>
+    <div class="sub" style="font-size:10.5px"><span style="color:#38e1ff">train</span> ·
+      <span style="color:#5ff3b4">held-out</span> loss</div>
+    <div class="r" style="margin-top:7px"><span>driving</span><b id="cDrive">human</b></div>
   </div>
-  <!-- ACT 4 -->
-  <div id="p_race" style="display:none">
+  <!-- BEAT 4 : the comparison AND the measured result, together -->
+  <div id="p_proof" style="display:none">
     <h4>SAME ROBOT, TWO PLANNERS</h4>
     <table id="raceTbl">
       <tr><th></th><th class="amber" style="text-align:right">NAIVE</th>
                     <th class="green" style="text-align:right">PREDICTIVE</th></tr>
       <tr><td>staff hit</td><td class="v amber" id="rcHitN">0</td><td class="v green" id="rcHitP">0</td></tr>
-      <tr><td>frozen</td><td class="v amber" id="rcStN">0%</td><td class="v green" id="rcStP">0%</td></tr>
       <tr><td>metres</td><td class="v amber" id="rcDN">0</td><td class="v green" id="rcDP">0</td></tr>
     </table>
-    <div class="sub" style="margin-top:9px">Counterfactuals of one robot. They do not see each other.</div>
-  </div>
-  <!-- ACT 4 -->
-  <div id="p_honest" style="display:none">
-    <h4>THE HONEST RESULT</h4>
-    <div class="big green" id="hBig">+62%</div>
-    <div class="sub">fewer collisions in open space, and the gain grows with crowd density.</div>
-    <div class="sub" style="margin-top:9px;color:#ffc24d">In tight corridors it becomes a trade.
-      The naive robot looks safe mainly because it is frozen most of the time.</div>
+    <div id="proofResult" class="sub" style="margin-top:10px">Both cover the same ground.
+      The green one hits fewer people.</div>
   </div>
 </div>
 
 <div id="ctl" class="panel">
-  <button id="bNext" class="pri">Next step ▸</button>
-  <button id="bRestart">Restart</button>
-  <button id="bAdv">Advanced</button>
+  <button id="bPrimary" class="pri">Train on this data ▸</button>
+  <button id="bDriveMe">Drive it yourself</button>
+  <button id="bCard">What was trained?</button>
 </div>
 
 <!-- Controls shown as actual keys, always visible while driving. No hidden
@@ -166,16 +160,13 @@
   <div class="krow"><span class="k wide">drag</span><span>look around</span></div>
 </div>
 
-<div id="adv" class="panel">
-  <div class="r"><span>predictor</span><b id="aMode">physics</b></div>
-  <div class="r"><span>ADE</span><b id="aAde">-</b></div>
-  <div class="r"><span>FDE</span><b id="aFde">-</b></div>
-  <button id="bClone">Clone my driving (C)</button>
-  <button id="bWorld">Whole ward on it (V)</button>
-  <button id="bTrain">Train crowd predictor (T)</button>
-  <button id="bCard">What was trained? (M)</button>
-  <button id="bStudy">Run stratified study</button>
-  <button id="bData">Download dataset</button>
+<!-- No "Advanced" tab. The evidence belongs in the story, so the model card and
+     the study are reachable from the main bar and from the closing card. These
+     stay as hidden hooks only so existing handlers keep working. -->
+<div id="adv" style="display:none">
+  <span id="aMode"></span><span id="aAde"></span><span id="aFde"></span>
+  <button id="bClone"></button><button id="bWorld"></button>
+  <button id="bTrain"></button><button id="bStudy"></button><button id="bData"></button>
 </div>
 
 <div id="over"></div>

@@ -1,51 +1,46 @@
 // ============================================================================
 // OWNER: P1  —  THE DEMO SPINE
 //
-// Two ways in, and the default requires NO input at all:
+// ONE argument, four beats. Earlier versions were a feature tour: two different
+// models making two different claims, with the evidence hidden behind an
+// "Advanced" tab nobody opens. The argument is:
 //
-//   AUTO   a 60 second hands-off sequence. Nobody presses anything. A judge who
-//          opens the link cold sees the entire argument end to end. This is also
-//          exactly what gets screen-recorded for the backup video.
-//   DRIVE  the judge takes the wheel, and their run becomes the training data.
+//   1. A human does something hard.
+//   2. We record it in a form robots can learn from.
+//   3. A model learns it and does the job itself.
+//   4. Here is the proof it helps, and where it stops helping.
 //
-// The sequence is built so it degrades gracefully: Act 1 is driven by the
-// scripted waypoint driver, which reaches the OR 8 times out of 8, so the demo
-// never stalls even if the learned policy underperforms.
+// Every beat has exactly ONE obvious button that says what happens next, so
+// nothing depends on a hidden key and nothing needs explaining.
 // ============================================================================
 
 const Demo = {
   act: 0, auto: false, t0: 0, fired: -1,
 
   ACTS: [
-    { id: 'play', title: 'THE JOB',
-      caption: 'A trauma patient has to cross a busy ward to the operating room.',
-      panel: 'vitals', camera: 'fp', hint: '' },
+    { id: 'play', title: '1. A HUMAN DOES THE HARD PART',
+      caption: 'Get the patient across a moving ward to the operating room without hitting anyone.',
+      panel: 'vitals', camera: 'fp', primary: null },
 
-    { id: 'data', title: 'EVERY FRAME IS A TRAINING PAIR',
-      caption: 'We log what the driver saw and what the driver DID. Human datasets have the first and not the second.',
-      panel: 'data', camera: 'fp', hint: '' },
+    { id: 'data', title: '2. EVERY MOMENT IS RECORDED',
+      caption: 'What the driver saw, and what the driver DID. Human datasets like Ego4D have the first and not the second, which is why they cannot train a controller.',
+      panel: 'data', camera: 'fp', primary: { label: 'Train on this data ▸', cue: 'clone' } },
 
-    { id: 'clone', title: 'NOW IT DRIVES ITSELF',
-      caption: 'A policy cloned from those demonstrations is in the driving seat. Same recipe as pi0 and SmolVLA, without the vision encoder.',
-      panel: 'clone', camera: 'fp', hint: '' },
+    { id: 'clone', title: '3. THE MODEL LEARNS TO DRIVE',
+      caption: 'Cloned from those demonstrations, it now takes the wheel. The same recipe as pi0 and SmolVLA, without the vision encoder.',
+      panel: 'clone', camera: 'fp', primary: { label: 'Run the whole ward on it ▸', cue: 'world' } },
 
-    { id: 'robot', title: 'SAME ROBOT. SAME CROWD.',
-      caption: 'Only the planner differs. Amber plans on where people are now. Green plans on where they will be.',
-      panel: 'race', camera: 'overhead', hint: 'amber plans on now, green plans ahead' },
-
-    { id: 'honest', title: 'WHERE IT DOES NOT WORK',
-      caption: 'In open space prediction is a clean win. In tight corridors it trades safety for throughput. The freezing robot problem is still open.',
-      panel: 'honest', camera: 'overhead', hint: '' },
+    { id: 'proof', title: '4. DOES IT ACTUALLY HELP?',
+      caption: 'One robot, two planners, same crowd. Amber plans on where people are. Green plans on where they will be.',
+      panel: 'proof', camera: 'overhead', primary: { label: 'Measure it ▸', cue: 'study' } },
   ],
 
-  // Hands-off timeline. Each entry fires once, when the clock passes `at`.
   TIMELINE: [
-    { at: 0,  act: 0, do: 'scripted' },   // the scripted driver takes the patient across
-    { at: 14, act: 1, do: 'train' },      // logging becomes a dataset, predictor trains
-    { at: 26, act: 2, do: 'clone' },      // hand the gurney to the cloned policy
-    { at: 36, act: 2, do: 'world' },      // hand the ENTIRE ward to it
-    { at: 45, act: 3, do: null },         // the two robots race
-    { at: 56, act: 4, do: null },         // the honest caveat
+    { at: 0,  act: 0, do: 'scripted' },
+    { at: 15, act: 1, do: 'clone' },      // record, then learn from it
+    { at: 30, act: 2, do: 'drive' },      // the model drives
+    { at: 40, act: 2, do: 'world' },      // then every agent in the ward
+    { at: 48, act: 3, do: null },         // the two planners, side by side
     { at: 62, act: -1, do: 'end' },
   ],
 
@@ -61,7 +56,6 @@ const Demo = {
     document.getElementById('autoBar').style.display = 'none';
   },
 
-  // called every frame from the game loop
   tick() {
     if (!this.auto) return;
     const t = (performance.now() - this.t0) / 1000;
@@ -81,10 +75,14 @@ const Demo = {
     const a = this.current();
     document.getElementById('capTitle').textContent = a.title;
     document.getElementById('capText').textContent = a.caption;
-    document.getElementById('capHint').textContent = this.auto ? '' : a.hint;
-    document.getElementById('capStep').textContent = `${i + 1} / ${this.ACTS.length}`;
-    for (const p of ['vitals', 'data', 'clone', 'race', 'honest'])
+    document.getElementById('capStep').textContent = `STEP ${i + 1} OF ${this.ACTS.length}`;
+    document.getElementById('capHint').textContent = '';   // controls live on-screen, not in text
+    for (const p of ['vitals', 'data', 'clone', 'proof'])
       document.getElementById('p_' + p).style.display = (p === a.panel) ? 'block' : 'none';
+    // One contextual primary action per beat. Never a hidden key, never a tab.
+    const b = document.getElementById('bPrimary');
+    if (a.primary && !this.auto) { b.style.display = 'inline-block'; b.textContent = a.primary.label; }
+    else b.style.display = 'none';
     if (this.onEnter) this.onEnter(a);
   },
 };

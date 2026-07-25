@@ -456,11 +456,9 @@ function loop() {
     if (BOTS.naive.gx !== BOTS.predictive.gx) {           // keep their targets identical
       BOTS.predictive.gx = BOTS.naive.gx; BOTS.predictive.gz = BOTS.naive.gz;
     }
-    if (tick % 10 === 0 && Demo.current().panel === 'race') {
+    if (tick % 10 === 0 && Demo.current().panel === 'proof') {
       const n = BOTS.naive, p = BOTS.predictive;
       $('rcHitN').textContent = n.stats.hits; $('rcHitP').textContent = p.stats.hits;
-      $('rcStN').textContent = n.stallPct().toFixed(0) + '%';
-      $('rcStP').textContent = p.stallPct().toFixed(0) + '%';
       $('rcDN').textContent = Math.round(distN); $('rcDP').textContent = Math.round(distP);
     }
 
@@ -520,16 +518,17 @@ function finish(won) {
   const o = $('over');
   o.innerHTML = `<h2 style="color:${won ? '#5ff3b4' : '#ff5a5a'}">
       ${won ? 'PATIENT DELIVERED' : 'PATIENT LOST'}</h2>
-    <p>${secs}s · ${stats.hit} collisions · ${stats.miss} near-misses</p>
-    <p style="color:#5ff3b4">${s.rows} trajectory rows logged across ${s.frames} frames</p>
-    <p style="font-size:12px;color:#6c7a95;max-width:430px">ETH/UCY format, ready for
-       Social GAN and Human Scene Transformer</p>
-    <div style="margin-top:14px">
-      <button id="bAgain">Run it again</button>
-      <button id="bOnward" class="pri">Next: train on it ▸</button>
+    <p>${secs}s · ${stats.hit} collisions</p>
+    <p style="color:#5ff3b4;font-size:17px;margin-top:10px">You just produced
+       <b>${s.frames}</b> training pairs</p>
+    <p style="font-size:12.5px;color:#8792ad;max-width:440px">Each one is what you saw paired with
+       what you did. That is the part human datasets are missing.</p>
+    <div style="margin-top:16px">
+      <button id="bOnward" class="pri">Now train a model on my run ▸</button>
+      <button id="bAgain">Drive another run</button>
     </div>`;
   o.style.display = 'flex';
-  // these live INSIDE the overlay, which sits above the control bar
+  // The run has to lead somewhere obvious, or a judge who drives just stops here.
   $('bAgain').onclick = () => { o.style.display = 'none'; reset(); };
   $('bOnward').onclick = () => { o.style.display = 'none'; Demo.go(1); };
 }
@@ -545,7 +544,11 @@ Demo.onEnter = a => {
   $('keys').style.display = (a.camera === 'fp' && !Demo.auto && Policy.drive === 'human')
     ? 'block' : 'none';
   gurney.visible = a.camera === 'fp';
-  if (a.id === 'robot') {                       // start the race clean and side by side
+  if (a.camera === 'overhead') {                // snap the follow cam so it never starts blank
+    camAim.x = (BOTS.naive.x + BOTS.predictive.x) / 2;
+    camAim.z = (BOTS.naive.z + BOTS.predictive.z) / 2;
+  }
+  if (a.id === 'proof') {                       // start the race clean and side by side
     for (const k of ['naive', 'predictive']) BOTS[k].stats = { hits: 0, stall: 0, t: 0 };
     BOTS.naive.trail.length = 0; BOTS.predictive.trail.length = 0;
     distN = distP = 0;
@@ -608,10 +611,12 @@ function cloneNow(cb) {
       if ((m.quality || 0) >= .6) {
         $('cBig').innerHTML = `<span class="green">${pct}%</span> success`;
         $('cSub').textContent = 'closed-loop: it reaches the OR on its own. Handing over the controls.';
+        drawMini('cCurve', m.history);
         setDrive('auto');
       } else {
         $('cBig').innerHTML = `<span style="color:#ffc24d">${pct}%</span> success`;
         $('cSub').textContent = 'not good enough to drive yet, so it stays a passenger. More demonstrations would fix it.';
+        drawMini('cCurve', m.history);
         Policy.drive = 'scripted';
       }
       if (cb) cb(m);
@@ -623,6 +628,23 @@ $('bWorld').onclick = () => {
   setDrive(Policy.drive === 'world' ? 'auto' : 'world');
 };
 // ---- the model card: architecture, data, loss curve, multi-agent evidence ----
+// Small inline curve for the act panel: the evidence sits in the story, not in a
+// tab. Same data as the full chart on the model card.
+function drawMini(id, hist) {
+  const cv = document.getElementById(id); if (!cv || !hist || !hist.length) return;
+  const g = cv.getContext('2d'), w = cv.width, h = cv.height;
+  const all = hist.flatMap(p => [p.train, p.val]).filter(isFinite);
+  const hi = Math.max(...all), lo = Math.min(...all);
+  const X = i => 3 + i / Math.max(1, hist.length - 1) * (w - 6);
+  const Y = v => h - 4 - (v - lo) / ((hi - lo) || 1) * (h - 10);
+  g.clearRect(0, 0, w, h);
+  for (const [k, c] of [['train', '#38e1ff'], ['val', '#5ff3b4']]) {
+    g.strokeStyle = c; g.lineWidth = 1.6; g.beginPath();
+    hist.forEach((p, i) => i ? g.lineTo(X(i), Y(p[k])) : g.moveTo(X(i), Y(p[k])));
+    g.stroke();
+  }
+}
+
 function lossChart(hist, w = 620, h = 130) {
   if (!hist || !hist.length) return '<div class="cite">no training run yet</div>';
   const id = 'lc' + Math.random().toString(36).slice(2, 7);
@@ -721,11 +743,19 @@ function showCard() {
 $('bCard').onclick = showCard;
 $('kClose').onclick = () => $('card').style.display = 'none';
 
-$('bNext').onclick = () => Demo.next();
-$('bRestart').onclick = () => reset();
-$('bAdv').onclick = () => {
-  const a = $('adv'); a.style.display = a.style.display === 'block' ? 'none' : 'block';
+// The one contextual button. It always says what happens next, and doing it
+// advances the story, so there is nothing to discover and nothing to explain.
+$('bPrimary').onclick = () => {
+  const p = Demo.current().primary;
+  if (!p) return;
+  if (p.cue === 'clone') { Demo.go(2); cloneNow(); }
+  else if (p.cue === 'world') {
+    if (Policy.trained && Policy.quality >= .6) setDrive('world');
+    Demo.go(3);
+  } else if (p.cue === 'study') $('bStudy').click();
 };
+$('bDriveMe').onclick = () => takeTheWheel();
+$('bRestart').onclick = () => reset();
 $('bTrain').onclick = trainNow;
 $('bData').onclick = () => Telemetry.download();
 
@@ -762,7 +792,7 @@ addEventListener('keydown', e => {
   else if (k === 't') trainNow();
   else if (k === 'c') $('bClone').click();
   else if (k === 'v') $('bWorld').click();
-  else if (k === 'a') $('bAdv').click();
+  else if (k === 'a') showCard();
   else if (k === 'm') showCard();
   else if (k === 'escape') $('study').style.display = 'none';
 });
@@ -771,9 +801,9 @@ addEventListener('keydown', e => {
 Demo.onCue = cue => {
   if (cue === 'scripted') { reset(); Policy.drive = 'scripted'; ScriptedDriver.reset(); }
   else if (cue === 'train') { if (!Trainer.busy) trainNow(); }
-  else if (cue === 'clone') {
+  else if (cue === 'clone') { if (!Policy.trained && !Policy.busy) cloneNow(); }
+  else if (cue === 'drive') {
     if (Policy.trained && Policy.quality >= .6) setDrive('auto');
-    else if (!Policy.busy) cloneNow();                  // gate inside decides if it drives
   } else if (cue === 'world') {
     // Only hand the ward over if the policy actually drives. A weak policy makes
     // every agent look broken, which is worse than showing nothing.
