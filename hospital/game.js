@@ -184,8 +184,9 @@ function loop() {
     bed.speed -= bed.speed * DRAG * dt;                       // rolling friction / coast
     if (!throttle && Math.abs(bed.speed) < .05) bed.speed = 0;
     bed.speed = clamp(bed.speed, -MAX_REV, MAX_FWD);
-    // wheels bite only while rolling; steering naturally inverts when reversing
-    bed.heading += steer * TURN * (bed.speed / MAX_FWD) * dt;
+    // wheels bite only while rolling; steering naturally inverts when reversing.
+    // minus: forward is -z and right is +x, so turning right DECREASES heading.
+    bed.heading -= steer * TURN * (bed.speed / MAX_FWD) * dt;
 
     const fx = -Math.sin(bed.heading), fz = -Math.cos(bed.heading);
     const nx = bed.x + fx * bed.speed * dt, nz = bed.z + fz * bed.speed * dt;
