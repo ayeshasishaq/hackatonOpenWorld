@@ -14,18 +14,24 @@
 // is exactly the claim: human trajectory data makes a robot navigate better.
 // ============================================================================
 
-const Robot = {
+const RobotProto = {
   R: .34, MAXV: 1.75, ACC: 5.0,
   SAFE: 1.15,                        // personal space it tries to keep
-  mode: 'naive',                     // 'naive' | 'predictive'
-  x: 0, z: 0, vx: 0, vz: 0, gx: 0, gz: 0,
-  stats: { hits: 0, stall: 0, t: 0 },
-  wasHit: false, active: true,
 
-  reset(LEVEL, solids) {
+  reset(LEVEL, solids, keepGoal) {
     this.x = -9; this.z = 14; this.vx = this.vz = 0;
     this.stats = { hits: 0, stall: 0, t: 0 }; this.wasHit = false;
-    this.newGoal(LEVEL, solids);
+    this.trail.length = 0;
+    if (!keepGoal) this.newGoal(LEVEL, solids);
+  },
+
+  // Path history for the on-screen trail. Capped, so it never grows unbounded.
+  pushTrail() {
+    const t = this.trail, n = t.length;
+    if (n === 0 || Math.hypot(this.x - t[n - 2], this.z - t[n - 1]) > .35) {
+      t.push(this.x, this.z);
+      if (t.length > 600) t.splice(0, 2);
+    }
   },
 
   blocked(x, z, LEVEL, solids, pad = .7) {
@@ -126,5 +132,23 @@ const Robot = {
     if (hit && !this.wasHit) this.stats.hits++;
     this.wasHit = hit;
     if (Math.hypot(this.vx, this.vz) < .35) this.stats.stall += dt;   // the freezing problem
+    this.pushTrail();
   },
+
+  get stalled() { return Math.hypot(this.vx, this.vz) < .35; },
+  hitsPerMin() { return this.stats.t > 2 ? this.stats.hits / (this.stats.t / 60) : 0; },
+  stallPct() { return this.stats.t > 2 ? 100 * this.stats.stall / this.stats.t : 0; },
 };
+
+// Two planners are run as COUNTERFACTUALS of the same robot: same spawn, same
+// goal, same crowd, and they do not see each other. That is what makes the
+// side-by-side race a fair comparison rather than two robots getting in the way.
+function makeRobot(mode) {
+  return Object.assign(Object.create(RobotProto), {
+    mode, x: 0, z: 0, vx: 0, vz: 0, gx: 0, gz: 0,
+    stats: { hits: 0, stall: 0, t: 0 }, wasHit: false, active: true, trail: [],
+  });
+}
+
+// Kept so study.js and any existing callers keep working unchanged.
+const Robot = makeRobot('naive');

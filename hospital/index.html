@@ -1,54 +1,76 @@
 <!doctype html><html><head><meta charset="utf-8">
-<title>Code Blue · first-person hospital navigation data engine</title>
+<title>Code Blue · a navigation data engine for hospital robots</title>
 <style>
  html,body{margin:0;height:100%;background:#05060a;color:#e8edf7;overflow:hidden;
    font-family:system-ui,-apple-system,sans-serif}
  canvas{display:block}
- .panel{position:fixed;background:rgba(14,18,28,.82);border:1px solid rgba(120,140,190,.18);
+ .panel{position:fixed;background:rgba(12,16,26,.86);border:1px solid rgba(120,140,190,.18);
    border-radius:12px;backdrop-filter:blur(10px);z-index:10}
- #hud{top:14px;left:50%;transform:translateX(-50%);padding:10px 18px;text-align:center;font-size:14px}
- #hud b{font-variant-numeric:tabular-nums}
- #vitals{top:14px;right:14px;padding:12px 14px;width:190px;font-size:12px;
+
+ /* ---- the narrative spine: one caption, always ---- */
+ #cap{position:fixed;top:0;left:0;right:0;z-index:12;padding:16px 20px 20px;text-align:center;
+   background:linear-gradient(rgba(5,6,10,.92),rgba(5,6,10,0));pointer-events:none}
+ #capStep{font-size:11px;color:#5f6b85;letter-spacing:2px;font-family:ui-monospace,Menlo,monospace}
+ #capTitle{font-size:23px;font-weight:750;letter-spacing:.5px;margin:3px 0 4px}
+ #capText{font-size:14.5px;color:#aab6cc;max-width:640px;margin:0 auto;line-height:1.45}
+ #capHint{font-size:11.5px;color:#5f6b85;margin-top:9px;font-family:ui-monospace,Menlo,monospace}
+
+ /* ---- one contextual panel, bottom-left, never more than a few rows ---- */
+ #side{bottom:16px;left:16px;width:246px;padding:13px 15px;font-size:12.5px;
    font-family:ui-monospace,Menlo,monospace}
- #vitals .r{display:flex;justify-content:space-between;padding:2px 0;color:#8792ad}
- #vitals .r b{color:#e8edf7;font-weight:500}
- #bar{height:6px;border-radius:3px;background:#2a3350;margin-top:8px;overflow:hidden}
+ #side .r{display:flex;justify-content:space-between;padding:3px 0;color:#8792ad}
+ #side .r b{color:#e8edf7;font-weight:500}
+ #side h4{margin:0 0 8px;font-size:11px;letter-spacing:1.4px;color:#5f6b85;font-weight:600;
+   font-family:system-ui,sans-serif}
+ #bar{height:6px;border-radius:3px;background:#2a3350;margin:6px 0 9px;overflow:hidden}
  #barf{height:100%;width:100%;background:linear-gradient(90deg,#ff5a5a,#5ff3b4);transition:width .2s}
- #btns{bottom:14px;left:50%;transform:translateX(-50%);padding:8px}
- #model{top:14px;left:14px;width:210px;padding:12px 14px;font-size:12px;
-   font-family:ui-monospace,Menlo,monospace}
- #model .r{display:flex;justify-content:space-between;padding:2px 0;color:#8792ad}
- #model .r b{color:#e8edf7;font-weight:500}
- button{margin:0 3px;padding:8px 13px;background:rgba(255,255,255,.05);color:#e8edf7;
+ .big{font-size:27px;font-weight:700;letter-spacing:-.5px;font-family:system-ui,sans-serif;
+   line-height:1.15;margin:2px 0 1px}
+ .sub{font-size:11.5px;color:#7c88a2;line-height:1.45;font-family:system-ui,sans-serif}
+
+ /* ---- the race scoreboard: two columns, read at a glance ---- */
+ #race table{width:100%;border-collapse:collapse;font-size:12.5px}
+ #race th{font-size:10.5px;letter-spacing:1px;padding-bottom:6px;font-family:system-ui,sans-serif}
+ #race td{padding:4px 0;color:#8792ad}
+ #race td.v{text-align:right;font-weight:600;color:#e8edf7;font-variant-numeric:tabular-nums}
+ .amber{color:#ffc24d} .green{color:#5ff3b4}
+
+ #ctl{bottom:16px;left:50%;transform:translateX(-50%);padding:8px;z-index:14}
+ button{margin:0 3px;padding:9px 15px;background:rgba(255,255,255,.05);color:#e8edf7;
    border:1px solid rgba(120,140,190,.25);border-radius:8px;cursor:pointer;font-size:12.5px}
- button:hover{background:rgba(255,255,255,.1)}
- button.on{background:#38e1ff;color:#04222c;border-color:transparent}
- #start{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
-   flex-direction:column;background:rgba(5,6,10,.92);z-index:30;text-align:center;cursor:pointer}
- #start h1{font-size:52px;margin:0;letter-spacing:2px;font-weight:800;color:#ff5a5a}
+ button:hover{background:rgba(255,255,255,.11)}
+ button.pri{background:#38e1ff;color:#04222c;border-color:transparent;font-weight:650}
+
+ #adv{bottom:16px;right:16px;width:210px;padding:12px 14px;display:none;font-size:12px;
+   font-family:ui-monospace,Menlo,monospace}
+ #adv .r{display:flex;justify-content:space-between;padding:2px 0;color:#8792ad}
+ #adv .r b{color:#e8edf7;font-weight:500}
+ #adv button{width:100%;margin:4px 0 0;font-size:11.5px;padding:7px}
+
+ #start,#over{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+   flex-direction:column;background:rgba(5,6,10,.93);z-index:30;text-align:center}
+ #over{display:none;background:rgba(5,6,10,.86)}
+ #start h1{font-size:54px;margin:0;letter-spacing:3px;font-weight:800;color:#ff5a5a}
  #start .lead{color:#e8edf7;font-size:19px;margin:14px 0 2px;font-weight:600}
  #start p{color:#8792ad;margin:4px 0;font-size:15px}
  #start .keys{margin-top:16px;font-size:13px;color:#6c7a95}
  #start .keys b{color:#38e1ff}
  #start .go{margin-top:22px;padding:13px 30px;background:#38e1ff;color:#04222c;
    border-radius:9px;font-weight:700;font-size:15px;letter-spacing:1px}
- #over{position:fixed;inset:0;display:none;align-items:center;justify-content:center;
-   flex-direction:column;background:rgba(5,6,10,.85);z-index:25;text-align:center}
- #over h2{font-size:26px;margin:0 0 8px}
+ #over h2{font-size:27px;margin:0 0 6px}
  #over p{color:#8792ad;font-size:14px;margin:3px}
- #xhair{position:fixed;top:50%;left:50%;width:5px;height:5px;margin:-2.5px 0 0 -2.5px;
-   border-radius:50%;background:rgba(255,255,255,.5);z-index:9;pointer-events:none}
- #study{position:fixed;inset:auto;top:50%;left:50%;transform:translate(-50%,-50%);
-   display:none;z-index:40;background:rgba(12,16,24,.97);border:1px solid rgba(120,140,190,.25);
-   border-radius:14px;padding:20px 24px;max-width:min(760px,94vw);max-height:88vh;overflow:auto}
+
+ #study{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);display:none;z-index:40;
+   background:rgba(10,13,21,.98);border:1px solid rgba(120,140,190,.25);border-radius:14px;
+   padding:20px 24px;max-width:min(780px,94vw);max-height:88vh;overflow:auto}
  #study h3{margin:0 0 4px;font-size:17px}
- #study .sub{margin:0 0 14px;font-size:12px;color:#8792ad;max-width:600px;line-height:1.5}
  #study table{border-collapse:collapse;font-size:12px;font-family:ui-monospace,Menlo,monospace;width:100%}
  #study th,#study td{padding:5px 9px;text-align:right;border-bottom:1px solid rgba(120,140,190,.12)}
- #study th{color:#8792ad;font-weight:500;text-align:right}
+ #study th{color:#8792ad;font-weight:500}
  #study td:first-child,#study th:first-child,#study td:nth-child(2),#study th:nth-child(2){text-align:left}
  #study .good{color:#5ff3b4} #study .bad{color:#ff7a45} #study .flat{color:#8792ad}
- #study tr.sep td{border-top:1px solid rgba(120,140,190,.28)}
+ #xhair{position:fixed;top:50%;left:50%;width:5px;height:5px;margin:-2.5px 0 0 -2.5px;
+   border-radius:50%;background:rgba(255,255,255,.45);z-index:9;pointer-events:none;display:none}
 </style>
 <script type="importmap">{"imports":{
   "three":"https://unpkg.com/three@0.160.0/build/three.module.js",
@@ -56,55 +78,76 @@
 </head><body>
 
 <div id="xhair"></div>
-<div id="hud" class="panel">Get the patient to the <b style="color:#5ff3b4">OR</b> · <b id="dist">...</b></div>
 
-<div id="vitals" class="panel">
-  <div class="r"><span>patient</span><b id="vState">STABLE</b></div>
-  <div id="bar"><div id="barf"></div></div>
-  <div class="r" style="margin-top:8px"><span>time</span><b id="vTime">0.0s</b></div>
-  <div class="r"><span>collisions</span><b id="vHit">0</b></div>
-  <div class="r"><span>near-misses</span><b id="vMiss">0</b></div>
-  <div class="r"><span>frames logged</span><b id="vLog">0</b></div>
+<div id="cap">
+  <div id="capStep">1 / 4</div>
+  <div id="capTitle">THE JOB</div>
+  <div id="capText">Push the patient to the OR. Do not hit the staff.</div>
+  <div id="capHint">W S drive · A D steer · mouse look</div>
 </div>
 
-<div id="btns" class="panel">
-  <button id="bPredict" class="on">Prediction overlay</button>
-  <button id="bTrain">Train on my runs</button>
-  <button id="bRobot">Robot: naive</button>
-  <button id="bStudy">Run study</button>
-  <button id="bRestart">Restart</button>
-  <button id="bData">Download data</button>
-</div>
-
-<div id="model" class="panel">
-  <div class="r"><span>predictor</span><b id="mMode">physics</b></div>
-  <div class="r"><span>episodes logged</span><b id="mEps">0</b></div>
-  <div id="mScores" style="display:none">
-    <div class="r" style="margin-top:7px;color:#5f6b85">held-out 20%</div>
-    <div class="r"><span>ADE physics</span><b id="mAdeB">-</b></div>
-    <div class="r"><span>ADE learned</span><b id="mAdeL" style="color:#5ff3b4">-</b></div>
-    <div class="r" style="margin-top:4px"><span>FDE physics</span><b id="mFdeB">-</b></div>
-    <div class="r"><span>FDE learned</span><b id="mFdeL" style="color:#5ff3b4">-</b></div>
-    <div class="r" style="margin-top:4px"><span>FDE gain</span><b id="mGain" style="color:#5ff3b4">-</b></div>
+<div id="side" class="panel">
+  <!-- ACT 1 -->
+  <div id="p_vitals">
+    <h4>PATIENT</h4>
+    <div class="r"><span>condition</span><b id="vState">STABLE</b></div>
+    <div id="bar"><div id="barf"></div></div>
+    <div class="r"><span>distance to OR</span><b id="vDist">-</b></div>
+    <div class="r"><span>staff hit</span><b id="vHit">0</b></div>
   </div>
-  <div style="height:1px;background:rgba(120,140,190,.18);margin:9px -14px"></div>
-  <div class="r"><span>robot planner</span><b id="rMode" style="color:#ffc24d">naive</b></div>
-  <div class="r"><span>collisions</span><b id="rHits">0</b></div>
-  <div class="r"><span>time frozen</span><b id="rStall">0.0s</b></div>
-  <div class="r"><span>per minute</span><b id="rRate">-</b></div>
+  <!-- ACT 2 -->
+  <div id="p_data" style="display:none">
+    <h4>PREDICTOR</h4>
+    <div class="big" id="dBig">not trained</div>
+    <div class="sub" id="dSub">Play a run, then press T. The model trains here, in the browser.</div>
+    <div class="r" style="margin-top:9px"><span>runs logged</span><b id="dEps">0</b></div>
+    <div class="r"><span>trajectory rows</span><b id="dRows">0</b></div>
+  </div>
+  <!-- ACT 3 -->
+  <div id="p_race" style="display:none">
+    <h4>SAME ROBOT, TWO PLANNERS</h4>
+    <table id="raceTbl">
+      <tr><th></th><th class="amber" style="text-align:right">NAIVE</th>
+                    <th class="green" style="text-align:right">PREDICTIVE</th></tr>
+      <tr><td>staff hit</td><td class="v amber" id="rcHitN">0</td><td class="v green" id="rcHitP">0</td></tr>
+      <tr><td>frozen</td><td class="v amber" id="rcStN">0%</td><td class="v green" id="rcStP">0%</td></tr>
+      <tr><td>metres</td><td class="v amber" id="rcDN">0</td><td class="v green" id="rcDP">0</td></tr>
+    </table>
+    <div class="sub" style="margin-top:9px">Counterfactuals of one robot. They do not see each other.</div>
+  </div>
+  <!-- ACT 4 -->
+  <div id="p_honest" style="display:none">
+    <h4>THE HONEST RESULT</h4>
+    <div class="big green" id="hBig">+62%</div>
+    <div class="sub">fewer collisions in open space, and the gain grows with crowd density.</div>
+    <div class="sub" style="margin-top:9px;color:#ffc24d">In tight corridors it becomes a trade.
+      The naive robot looks safe mainly because it is frozen most of the time.</div>
+  </div>
+</div>
+
+<div id="ctl" class="panel">
+  <button id="bNext" class="pri">Next ▸</button>
+  <button id="bRestart">Restart run</button>
+  <button id="bAdv">Advanced</button>
+</div>
+
+<div id="adv" class="panel">
+  <div class="r"><span>predictor</span><b id="aMode">physics</b></div>
+  <div class="r"><span>ADE</span><b id="aAde">-</b></div>
+  <div class="r"><span>FDE</span><b id="aFde">-</b></div>
+  <button id="bTrain">Train on my runs (T)</button>
+  <button id="bStudy">Run stratified study</button>
+  <button id="bData">Download dataset</button>
 </div>
 
 <div id="over"></div>
 
 <div id="study">
   <h3>Where does prediction actually help?</h3>
-  <p class="sub">Same controller and map in every cell. Only the planning input changes.
-     Stratified by density and geometry, after Liu et al., "Beyond ADE and FDE".</p>
+  <p class="sub" style="margin:0 0 14px;max-width:620px">Same controller and map in every cell, only the
+    planning input changes. Stratified by density and geometry, after Liu et al., "Beyond ADE and FDE".</p>
   <div id="studyTable"></div>
-  <div style="margin-top:12px">
-    <button id="sCopy">Copy as table</button>
-    <button id="sClose">Close</button>
-  </div>
+  <div style="margin-top:12px"><button id="sCopy">Copy as table</button><button id="sClose">Close</button></div>
 </div>
 
 <div id="start">
@@ -121,5 +164,6 @@
 <script src="predict.js"></script>
 <script src="robot.js"></script>
 <script src="study.js"></script>
+<script src="demo.js"></script>
 <script type="module" src="game.js"></script>
 </body></html>

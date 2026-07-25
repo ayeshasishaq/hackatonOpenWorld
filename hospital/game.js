@@ -196,7 +196,7 @@ const BODY_MAT = {};
 for (const k in KIND_COLOR)
   BODY_MAT[k] = new THREE.MeshStandardMaterial({ color: KIND_COLOR[k], roughness: .75 });
 
-let crowd, crowdMeshes = [], lastPreds = null;
+let crowd, crowdMeshes = [], lastPreds = null, distN = 0, distP = 0;
 function buildCrowdMeshes() {
   crowdMeshes.forEach(m => scene.remove(m)); crowdMeshes = [];
   crowd.agents.forEach(a => {
@@ -208,30 +208,68 @@ function buildCrowdMeshes() {
   });
 }
 
-// ---------- the autonomous delivery robot ----------
-const robotMesh = new THREE.Group();
-{
-  const shell = new THREE.Mesh(new THREE.CylinderGeometry(.32, .36, .8, 18),
-    new THREE.MeshStandardMaterial({ color: 0x123240, emissive: 0x0a3a47,
-                                     emissiveIntensity: .55, metalness: .35, roughness: .4 }));
-  shell.position.y = .42; shell.castShadow = true; robotMesh.add(shell);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(.22, 16, 12),
-    new THREE.MeshStandardMaterial({ color: 0x0d1c24, roughness: .35 }));
-  head.position.y = .92; robotMesh.add(head);
-  const eye = new THREE.Mesh(new THREE.SphereGeometry(.075, 12, 10),
-    new THREE.MeshBasicMaterial({ color: 0x38e1ff }));
-  eye.position.set(0, .92, .2); robotMesh.add(eye);
-  robotMesh.userData.eye = eye.material;
-  const cargo = new THREE.Mesh(new THREE.BoxGeometry(.4, .16, .3),
-    new THREE.MeshStandardMaterial({ color: 0xe8eef7 }));
-  cargo.position.y = .9; robotMesh.add(cargo);
+// ---------- two robots, raced side by side ----------
+// The whole point of the demo: the difference has to be SEEN, not remembered.
+// Same spawn, same goal, same crowd, running at the same time.
+const NAIVE_C = 0xffc24d, PRED_C = 0x5ff3b4;
+// Floating name tag, so nobody has to guess which robot is which.
+function makeLabel(text, color, y) {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 64;
+  const x = c.getContext('2d');
+  x.font = 'bold 34px system-ui'; x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.fillStyle = '#' + color.toString(16).padStart(6, '0');
+  x.fillText(text, 128, 32);
+  const tex = new THREE.CanvasTexture(c);
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
+  s.scale.set(2.6, .65, 1); s.position.y = y; s.renderOrder = 999;   // staggered so they never collide
+  return s;
 }
-scene.add(robotMesh);
-// ring showing what the robot is planning against
-const robotRing = new THREE.Mesh(new THREE.RingGeometry(1.05, 1.2, 36),
-  new THREE.MeshBasicMaterial({ color: 0xffc24d, transparent: true, opacity: .3,
-                               side: THREE.DoubleSide }));
-robotRing.rotation.x = -Math.PI / 2; scene.add(robotRing);
+function makeRobotRig(color) {
+  const g = new THREE.Group();
+  const shell = new THREE.Mesh(new THREE.CylinderGeometry(.32, .36, .8, 18),
+    new THREE.MeshStandardMaterial({ color: 0x16202c, emissive: color,
+                                     emissiveIntensity: .35, metalness: .35, roughness: .45 }));
+  shell.position.y = .42; shell.castShadow = true; g.add(shell);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(.22, 14, 10),
+    new THREE.MeshStandardMaterial({ color: 0x0d1c24, roughness: .35 }));
+  head.position.y = .92; g.add(head);
+  const eye = new THREE.Mesh(new THREE.SphereGeometry(.08, 12, 10),
+    new THREE.MeshBasicMaterial({ color })); eye.position.set(0, .92, .2); g.add(eye);
+  const beacon = new THREE.Mesh(new THREE.SphereGeometry(.1, 10, 8),
+    new THREE.MeshBasicMaterial({ color })); beacon.position.y = 1.5; g.add(beacon);
+  const ring = new THREE.Mesh(new THREE.RingGeometry(.95, 1.12, 32),
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: .35, side: THREE.DoubleSide }));
+  ring.rotation.x = -Math.PI / 2; ring.position.y = .04; g.add(ring);
+  // trail: preallocated line, rewritten in place each frame
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(300 * 3), 3));
+  const trail = new THREE.Line(geo, new THREE.LineBasicMaterial({ color, transparent: true, opacity: .55 }));
+  trail.frustumCulled = false;
+  scene.add(g, trail);
+  return { g, ring, beacon, eye, trail, color };
+}
+const RIGS = { naive: makeRobotRig(NAIVE_C), predictive: makeRobotRig(PRED_C) };
+RIGS.naive.g.add(makeLabel('NAIVE', NAIVE_C, 2.2));
+RIGS.predictive.g.add(makeLabel('PREDICTIVE', PRED_C, 3.1));
+const BOTS = { naive: makeRobot('naive'), predictive: makeRobot('predictive') };
+
+function syncRobot(bot, rig, t) {
+  rig.g.position.set(bot.x, 0, bot.z);
+  if (Math.hypot(bot.vx, bot.vz) > .05) rig.g.rotation.y = Math.atan2(bot.vx, bot.vz);
+  rig.ring.position.y = .04;
+  const frozen = bot.stalled;
+  rig.ring.material.color.setHex(frozen ? 0xff3b3b : rig.color);
+  rig.ring.material.opacity = frozen ? .35 + .3 * Math.abs(Math.sin(t * 6)) : .3;
+  rig.beacon.material.color.setHex(frozen ? 0xff3b3b : rig.color);
+  rig.beacon.scale.setScalar(frozen ? 1 + .35 * Math.abs(Math.sin(t * 6)) : 1);
+  const arr = rig.trail.geometry.attributes.position.array;
+  const n = Math.min(bot.trail.length / 2, 300);
+  for (let i = 0; i < n; i++) {
+    arr[i * 3] = bot.trail[i * 2]; arr[i * 3 + 1] = .08; arr[i * 3 + 2] = bot.trail[i * 2 + 1];
+  }
+  rig.trail.geometry.attributes.position.needsUpdate = true;
+  rig.trail.geometry.setDrawRange(0, n);
+}
 
 // ---------- prediction overlay ----------
 // PERF: objects are pooled and rewritten in place. Rebuilding geometry every
@@ -286,6 +324,8 @@ const BED_R = .5, BED_HALF = .9;          // trolley = capsule: radius + half it
 const PUSH = 2.45, EYE = 1.88, PITCH = -0.24;   // stand back and look down on the patient
 const bed = { x: LEVEL.spawn.x, z: LEVEL.spawn.z, heading: 0, speed: 0 };  // heading 0 = -z, toward the OR
 let headYaw = 0;                          // mouse look, decoupled from where the bed points
+let camMode = 'fp';                       // 'fp' while driving, 'overhead' to watch the robots
+const camAim = { x: 0, z: 0 };            // smoothed overhead follow target
 camera.rotation.order = 'YXZ';
 const keys = {};
 addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; if (e.key === ' ') e.preventDefault(); });
@@ -320,8 +360,11 @@ let health, running, started, t0, tick, wasHit, stats;
 function reset() {
   crowd = createCrowd(LEVEL, SOLIDS); buildCrowdMeshes();
   bed.x = LEVEL.spawn.x; bed.z = LEVEL.spawn.z; bed.heading = 0; bed.speed = 0;
-  headYaw = 0; lastPreds = null;
-  Robot.reset(LEVEL, SOLIDS);
+  headYaw = 0; lastPreds = null; distN = distP = 0;
+  BOTS.naive.reset(LEVEL, SOLIDS);
+  BOTS.predictive.reset(LEVEL, SOLIDS, true);            // share the naive robot's goal
+  BOTS.predictive.x = BOTS.naive.x; BOTS.predictive.z = BOTS.naive.z;
+  BOTS.predictive.gx = BOTS.naive.gx; BOTS.predictive.gz = BOTS.naive.gz;
   health = 100; running = true; wasHit = false; tick = 0;
   stats = { hit: 0, miss: 0 }; Telemetry.reset(); t0 = performance.now();
   document.getElementById('over').style.display = 'none';
@@ -379,20 +422,24 @@ function loop() {
     // The robot reuses these same forecasts, so we never compute them twice.
     if (tick % 5 === 0) { lastPreds = Predictor.predict(agents, bed); drawPredictions(lastPreds); }
 
-    // ---- the robot drives itself through the same crowd ----
-    Robot.step(dt, agents, lastPreds, LEVEL, SOLIDS, Predictor.DT);
-    robotMesh.position.set(Robot.x, 0, Robot.z);
-    if (Math.hypot(Robot.vx, Robot.vz) > .05)
-      robotMesh.rotation.y = Math.atan2(Robot.vx, Robot.vz);
-    robotRing.position.set(Robot.x, .04, Robot.z);
-    const stalled = Math.hypot(Robot.vx, Robot.vz) < .35;
-    robotRing.material.color.setHex(stalled ? 0xff5a5a : (Robot.mode === 'predictive' ? 0x5ff3b4 : 0xffc24d));
-    robotMesh.userData.eye.color.setHex(stalled ? 0xff5a5a : 0x38e1ff);
-    if (tick % 12 === 0) {
-      $('rHits').textContent = Robot.stats.hits;
-      $('rStall').textContent = Robot.stats.stall.toFixed(1) + 's';
-      $('rRate').textContent = Robot.stats.t > 3
-        ? (Robot.stats.hits / (Robot.stats.t / 60)).toFixed(1) + ' hits/min' : '-';
+    // ---- both robots drive through the same crowd, as counterfactuals ----
+    // They share a goal so you watch them pick different routes to the same place.
+    for (const k of ['naive', 'predictive']) {
+      const b = BOTS[k], ox = b.x, oz = b.z;
+      b.step(dt, agents, lastPreds, LEVEL, SOLIDS, Predictor.DT);
+      const moved = Math.hypot(b.x - ox, b.z - oz);
+      if (k === 'naive') distN += moved; else distP += moved;
+      syncRobot(b, RIGS[k], clock.elapsedTime);
+    }
+    if (BOTS.naive.gx !== BOTS.predictive.gx) {           // keep their targets identical
+      BOTS.predictive.gx = BOTS.naive.gx; BOTS.predictive.gz = BOTS.naive.gz;
+    }
+    if (tick % 10 === 0 && Demo.current().panel === 'race') {
+      const n = BOTS.naive, p = BOTS.predictive;
+      $('rcHitN').textContent = n.stats.hits; $('rcHitP').textContent = p.stats.hits;
+      $('rcStN').textContent = n.stallPct().toFixed(0) + '%';
+      $('rcStP').textContent = p.stallPct().toFixed(0) + '%';
+      $('rcDN').textContent = Math.round(distN); $('rcDP').textContent = Math.round(distP);
     }
 
     // ---- log (~10 Hz).  yaw = head orientation, which now differs from travel
@@ -407,22 +454,33 @@ function loop() {
 
     // ---- hud ---- (distance measured from the BED: the patient is what must arrive)
     const d = Math.hypot(bed.x - LEVEL.goal.x, bed.z - LEVEL.goal.z);
-    $('dist').textContent = d.toFixed(1) + ' m';
-    $('vTime').textContent = ((performance.now() - t0) / 1000).toFixed(1) + 's';
-    $('vHit').textContent = stats.hit; $('vMiss').textContent = stats.miss;
-    $('vLog').textContent = Telemetry.frames.length;
-    $('barf').style.width = Math.max(0, health) + '%';
-    $('vState').textContent = health > 66 ? 'STABLE' : health > 33 ? 'UNSTABLE' : 'CRITICAL';
-    $('vState').style.color = health > 66 ? '#5ff3b4' : health > 33 ? '#ffc24d' : '#ff5a5a';
+    if (tick % 6 === 0) {
+      $('vDist').textContent = d.toFixed(1) + ' m';
+      $('vHit').textContent = stats.hit;
+      $('barf').style.width = Math.max(0, health) + '%';
+      $('vState').textContent = health > 66 ? 'STABLE' : health > 33 ? 'UNSTABLE' : 'CRITICAL';
+      $('vState').style.color = health > 66 ? '#5ff3b4' : health > 33 ? '#ffc24d' : '#ff5a5a';
+      $('dEps').textContent = Trainer.episodes.length;
+      $('dRows').textContent = Telemetry.rows.length + Trainer.episodes.length * 0;
+    }
 
     if (d < LEVEL.goal.r) finish(true);
     else if (health <= 0) finish(false);
   }
 
-  // you walk BEHIND the trolley; your head can look around independently
-  const cfx = -Math.sin(bed.heading), cfz = -Math.cos(bed.heading);
-  camera.position.set(bed.x - cfx * PUSH, EYE, bed.z - cfz * PUSH);
-  camera.rotation.set(PITCH, bed.heading + headYaw, 0);
+  // camera: first person while you drive, overhead while you watch the robots.
+  // You cannot judge a robot's path from behind a gurney, so the act switches view.
+  if (camMode === 'overhead') {
+    const mx = (BOTS.naive.x + BOTS.predictive.x) / 2, mz = (BOTS.naive.z + BOTS.predictive.z) / 2;
+    camAim.x += (mx - camAim.x) * Math.min(1, dt * 1.5);
+    camAim.z += (mz - camAim.z) * Math.min(1, dt * 1.5);
+    camera.position.set(camAim.x, 21, camAim.z + 13);
+    camera.rotation.set(-1.02, 0, 0);
+  } else {
+    const cfx = -Math.sin(bed.heading), cfz = -Math.cos(bed.heading);
+    camera.position.set(bed.x - cfx * PUSH, EYE, bed.z - cfz * PUSH);
+    camera.rotation.set(PITCH, bed.heading + headYaw, 0);
+  }
   updatePatient(clock.elapsedTime, health);     // breathing / pain, before we place the rig
   gurney.position.set(bed.x + (P.shakeX || 0), P.shakeY || 0, bed.z);
   gurney.rotation.y = bed.heading;
@@ -436,7 +494,6 @@ function finish(won) {
   running = false;
   document.exitPointerLock?.();
   Trainer.addEpisode(Telemetry.frames);        // keep the run as training data
-  $('mEps').textContent = Trainer.episodes.length;
   const s = Telemetry.summary(), secs = ((performance.now() - t0) / 1000).toFixed(1);
   const o = $('over');
   o.innerHTML = `<h2 style="color:${won ? '#5ff3b4' : '#ff5a5a'}">
@@ -446,97 +503,109 @@ function finish(won) {
     <p style="font-size:12px;color:#6c7a95;max-width:430px">ETH/UCY format, ready for
        Social GAN and Human Scene Transformer</p>
     <div style="margin-top:14px">
-      <button id="bAgain">Try again</button>
-      <button id="bDl">Download data</button>
+      <button id="bAgain">Run it again</button>
+      <button id="bOnward" class="pri">Next: train on it ▸</button>
     </div>`;
   o.style.display = 'flex';
-  // these live INSIDE the overlay: #over sits above #btns, so the bottom bar is unclickable here
-  $('bAgain').onclick = () => { reset(); renderer.domElement.requestPointerLock(); };
-  $('bDl').onclick = () => Telemetry.download();
+  // these live INSIDE the overlay, which sits above the control bar
+  $('bAgain').onclick = () => { o.style.display = 'none'; reset(); renderer.domElement.requestPointerLock(); };
+  $('bOnward').onclick = () => { o.style.display = 'none'; Demo.go(1); };
 }
 
-// ---------- ui ----------
-// Train on the runs just played: the loop from human behaviour to a working model,
-// closed live in front of the judges.
-$('bTrain').onclick = () => {
+// ---------- the demo spine ----------
+// One caption, one panel, SPACE advances. The presenter never has to explain
+// mechanics, so the three minutes go on the story instead.
+Demo.onEnter = a => {
+  camMode = a.camera;
+  $('xhair').style.display = a.camera === 'fp' ? 'block' : 'none';
+  gurney.visible = a.camera === 'fp';
+  if (a.id === 'robot') {                       // start the race clean and side by side
+    for (const k of ['naive', 'predictive']) BOTS[k].stats = { hits: 0, stall: 0, t: 0 };
+    BOTS.naive.trail.length = 0; BOTS.predictive.trail.length = 0;
+    distN = distP = 0;
+    // 1.5 m apart so both are visible from frame one. Negligible over a 60 s race,
+    // and far better than two robots stacked on the same pixel.
+    BOTS.predictive.x = BOTS.naive.x + 1.5; BOTS.predictive.z = BOTS.naive.z;
+    BOTS.predictive.gx = BOTS.naive.gx; BOTS.predictive.gz = BOTS.naive.gz;
+  }
+  if (a.id === 'honest' && Study.results) {
+    const open = Study.results.filter(r => r.geom === 'open floor' && r.hitGain !== null);
+    if (open.length) $('hBig').textContent =
+      '+' + Math.round(Math.max(...open.map(r => r.hitGain))) + '%';
+  }
+  if (a.camera === 'fp' && started) renderer.domElement.requestPointerLock();
+};
+
+function trainNow() {
   const b = $('bTrain');
   if (Trainer.busy) return;
-  Trainer.addEpisode(Telemetry.frames);                    // include the run in progress
-  $('mEps').textContent = Trainer.episodes.length;
+  Trainer.addEpisode(Telemetry.frames);
+  $('dBig').textContent = 'training…'; $('dSub').textContent = 'fitting on your trajectories';
   b.textContent = 'Training 0%';
   Trainer.train(
-    p => b.textContent = `Training ${(p * 100) | 0}%`,
+    p => { b.textContent = `Training ${(p * 100) | 0}%`; $('dBig').textContent = `${(p * 100) | 0}%`; },
     m => {
-      if (m.error) { b.textContent = m.error; setTimeout(() => b.textContent = 'Train on my runs', 2600); return; }
-      b.textContent = 'Retrain'; b.classList.add('on');
-      $('mMode').textContent = 'learned MLP';
-      $('mMode').style.color = '#5ff3b4';
-      $('mScores').style.display = 'block';
-      $('mAdeB').textContent = m.adeB.toFixed(2) + ' m';
-      $('mAdeL').textContent = m.adeL.toFixed(2) + ' m';
-      $('mFdeB').textContent = m.fdeB.toFixed(2) + ' m';
-      $('mFdeL').textContent = m.fdeL.toFixed(2) + ' m';
-      const gain = 100 * (1 - m.fdeL / m.fdeB);            // FDE: the 1.6 s horizon
-      $('mGain').textContent = (gain >= 0 ? '+' : '') + gain.toFixed(0) + '%';
-      $('mGain').style.color = gain > 0 ? '#5ff3b4' : '#ffc24d';
-      $('mEps').textContent = `${m.episodes} (${m.samples} samples)`;
+      b.textContent = 'Train on my runs (T)';
+      if (m.error) { $('dBig').textContent = 'need more'; $('dSub').textContent = m.error; return; }
+      const gain = 100 * (1 - m.fdeL / m.fdeB);
+      $('dBig').innerHTML = `<span class="green">${gain >= 0 ? '-' : '+'}${Math.abs(gain).toFixed(0)}%</span> error`;
+      $('dSub').textContent = `at 1.6 s ahead, against a constant-velocity baseline, on held-out data`;
+      $('aMode').textContent = 'learned MLP';
+      $('aAde').textContent = `${m.adeB.toFixed(2)} → ${m.adeL.toFixed(2)} m`;
+      $('aFde').textContent = `${m.fdeB.toFixed(2)} → ${m.fdeL.toFixed(2)} m`;
     });
+}
+
+$('bNext').onclick = () => Demo.next();
+$('bRestart').onclick = () => { reset(); if (camMode === 'fp') renderer.domElement.requestPointerLock(); };
+$('bAdv').onclick = () => {
+  const a = $('adv'); a.style.display = a.style.display === 'block' ? 'none' : 'block';
 };
-// The headline comparison: same controller, same map, only the planning input changes.
-$('bRobot').onclick = () => {
-  Robot.mode = Robot.mode === 'naive' ? 'predictive' : 'naive';
-  Robot.stats = { hits: 0, stall: 0, t: 0 };            // reset so the two are comparable
-  const pred = Robot.mode === 'predictive';
-  $('bRobot').textContent = 'Robot: ' + Robot.mode;
-  $('bRobot').classList.toggle('on', pred);
-  $('rMode').textContent = Robot.mode;
-  $('rMode').style.color = pred ? '#5ff3b4' : '#ffc24d';
-};
-// The stratified study: not "does prediction help" but WHERE it helps.
+$('bTrain').onclick = trainNow;
+$('bData').onclick = () => Telemetry.download();
+
 $('bStudy').onclick = () => {
   if (Study.busy) return;
-  const b = $('bStudy');
-  b.textContent = 'Running 0%';
-  Study.run(
-    p => b.textContent = `Running ${(p * 100) | 0}%`,
-    rows => {
-      b.textContent = 'Run study';
-      const cell = v => {
-        if (v === null) return '<td class="flat">n/a</td>';         // zero baseline
-        const cls = Math.abs(v) < 8 ? 'flat' : (v > 0 ? 'good' : 'bad');
-        return `<td class="${cls}">${v >= 0 ? '+' : ''}${v.toFixed(0)}%</td>`;
-      };
-      let h = `<table><tr><th>geometry</th><th>density</th>
-        <th>hits/min</th><th>frozen</th><th>m/min</th>
-        <th>hits</th><th>frozen</th><th>throughput</th></tr>`;
-      let lastGeom = null;
-      for (const r of rows) {
-        const sep = r.geom !== lastGeom && lastGeom !== null ? ' class="sep"' : '';
-        lastGeom = r.geom;
-        h += `<tr${sep}><td>${r.geom}</td><td>${r.density} (${r.n})</td>
-          <td>${r.naive.hits.toFixed(1)} &rarr; ${r.pred.hits.toFixed(1)}</td>
-          <td>${r.naive.stall.toFixed(0)}% &rarr; ${r.pred.stall.toFixed(0)}%</td>
-          <td>${r.naive.dist.toFixed(0)} &rarr; ${r.pred.dist.toFixed(0)}</td>
-          ${cell(r.hitGain)}${cell(r.stallGain)}${cell(r.distGain)}</tr>`;
-      }
-      h += '</table><p class="sub" style="margin-top:12px">Left three columns are naive &rarr; predictive. '
-         + 'Right three are the gain from prediction. Green is a real improvement, grey is noise.</p>';
-      $('studyTable').innerHTML = h;
-      $('study').style.display = 'block';
-    });
+  const b = $('bStudy'); b.textContent = 'Running 0%';
+  Study.run(p => b.textContent = `Running ${(p * 100) | 0}%`, rows => {
+    b.textContent = 'Run stratified study';
+    const cell = v => {
+      if (v === null) return '<td class="flat">n/a</td>';
+      const cls = Math.abs(v) < 8 ? 'flat' : (v > 0 ? 'good' : 'bad');
+      return `<td class="${cls}">${v >= 0 ? '+' : ''}${v.toFixed(0)}%</td>`;
+    };
+    let h = `<table><tr><th>geometry</th><th>density</th><th>hits/min</th><th>frozen</th>
+      <th>m/min</th><th>hits</th><th>frozen</th><th>throughput</th></tr>`;
+    for (const r of rows)
+      h += `<tr><td>${r.geom}</td><td>${r.density} (${r.n})</td>
+        <td>${r.naive.hits.toFixed(1)} → ${r.pred.hits.toFixed(1)}</td>
+        <td>${r.naive.stall.toFixed(0)}% → ${r.pred.stall.toFixed(0)}%</td>
+        <td>${r.naive.dist.toFixed(0)} → ${r.pred.dist.toFixed(0)}</td>
+        ${cell(r.hitGain)}${cell(r.stallGain)}${cell(r.distGain)}</tr>`;
+    $('studyTable').innerHTML = h + '</table>';
+    $('study').style.display = 'block';
+    Demo.onEnter(Demo.current());                 // refresh the Act 4 headline number
+  });
 };
 $('sClose').onclick = () => $('study').style.display = 'none';
 $('sCopy').onclick = () => navigator.clipboard?.writeText(Study.asText());
-$('bRestart').onclick = () => { reset(); renderer.domElement.requestPointerLock(); };
-$('bData').onclick = () => Telemetry.download();
-$('bPredict').onclick = () => {
-  showPredict = !showPredict;
-  $('bPredict').classList.toggle('on', showPredict);
-  if (!showPredict) hidePredictions();     // hide, never clear: the pool owns these objects
-};
+
+addEventListener('keydown', e => {
+  if (!started) return;
+  const k = e.key.toLowerCase();
+  if (e.code === 'Space') { e.preventDefault(); Demo.next(); }
+  else if (k === 't') trainNow();
+  else if (k === 'a') $('bAdv').click();
+  else if (k === 'escape') $('study').style.display = 'none';
+});
+
 $('start').onclick = () => {
   $('start').style.display = 'none'; started = true;
+  Demo.go(0);
   renderer.domElement.requestPointerLock();
 };
+
+Demo.go(0);
+
 
 reset(); started = false; loop();
