@@ -24,7 +24,13 @@ const Demo = {
       panel: 'data', camera: 'fp',
       hint: 'press T to train · SPACE for next',
     },
-    { // 2
+    { // 2  — the AI headline
+      id: 'clone', title: 'NOW IT DRIVES ITSELF',
+      caption: 'A policy cloned from your demonstrations is in your seat. Same recipe as pi0 and SmolVLA, minus the vision encoder.',
+      panel: 'clone', camera: 'fp',
+      hint: 'press C for autopilot · V to run the whole ward on it · SPACE for next',
+    },
+    { // 3
       id: 'robot', title: 'SAME ROBOT. SAME CROWD.',
       caption: 'Only the planner differs. Amber plans on where people are. Green plans on where they will be.',
       panel: 'race', camera: 'overhead',
@@ -48,7 +54,7 @@ const Demo = {
     document.getElementById('capText').textContent = a.caption;
     document.getElementById('capHint').textContent = a.hint;
     document.getElementById('capStep').textContent = `${i + 1} / ${this.ACTS.length}`;
-    for (const p of ['vitals', 'data', 'race', 'honest'])
+    for (const p of ['vitals', 'data', 'clone', 'race', 'honest'])
       document.getElementById('p_' + p).style.display = (p === a.panel) ? 'block' : 'none';
     if (this.onEnter) this.onEnter(a);
   },

@@ -197,6 +197,7 @@ for (const k in KIND_COLOR)
   BODY_MAT[k] = new THREE.MeshStandardMaterial({ color: KIND_COLOR[k], roughness: .75 });
 
 let crowd, crowdMeshes = [], lastPreds = null, distN = 0, distP = 0;
+let lastAction = { throttle: 0, steer: 0 };
 function buildCrowdMeshes() {
   crowdMeshes.forEach(m => scene.remove(m)); crowdMeshes = [];
   crowd.agents.forEach(a => {
@@ -377,8 +378,19 @@ function loop() {
   const dt = Math.min(clock.getDelta(), .05);
   if (started && running) {
     // ---- trolley physics: W/S drive, A/D steer the wheels ----
-    const throttle = (keys['w'] || keys['arrowup'] ? 1 : 0) - (keys['s'] || keys['arrowdown'] ? 1 : 0);
-    const steer    = (keys['d'] || keys['arrowright'] ? 1 : 0) - (keys['a'] || keys['arrowleft'] ? 1 : 0);
+    // Either the human supplies the action, or the cloned policy does. Identical
+    // downstream, which is the point: the policy occupies the human's seat.
+    let throttle, steer;
+    if (Policy.drive === 'auto' && Policy.trained) {
+      const others = crowd.agents.map(a => ({ x: a.x, z: a.z, vx: a.vx, vz: a.vz }));
+      const a = Policy.act({ x: bed.x, z: bed.z, heading: bed.heading, speed: bed.speed },
+                           others, LEVEL.goal, LEVEL.walls);
+      throttle = a.throttle; steer = a.steer;
+    } else {
+      throttle = (keys['w'] || keys['arrowup'] ? 1 : 0) - (keys['s'] || keys['arrowdown'] ? 1 : 0);
+      steer    = (keys['d'] || keys['arrowright'] ? 1 : 0) - (keys['a'] || keys['arrowleft'] ? 1 : 0);
+    }
+    lastAction = { throttle, steer };
     bed.speed += throttle * ACCEL * dt;
     bed.speed -= bed.speed * DRAG * dt;                       // rolling friction / coast
     if (!throttle && Math.abs(bed.speed) < .05) bed.speed = 0;
@@ -448,7 +460,8 @@ function loop() {
     if (tick % 6 === 0) Telemetry.record({
       t: (performance.now() - t0) / 1000,
       player: { x: bed.x, z: bed.z, vx: fx * bed.speed, vz: fz * bed.speed,
-                yaw: bed.heading + headYaw },
+                yaw: bed.heading + headYaw, heading: bed.heading, speed: bed.speed },
+      action: lastAction,                    // the demonstration label
       goal: LEVEL.goal, crowd: agents, nearest, collided, nearMiss, health });
     tick++;
 
@@ -556,6 +569,33 @@ function trainNow() {
     });
 }
 
+// ---- behaviour cloning: the human's own driving becomes the controller ----
+function setDrive(mode) {
+  Policy.drive = mode;
+  $('cDrive').textContent = mode === 'human' ? 'human' : mode === 'auto' ? 'cloned policy' : 'whole ward';
+  $('cDrive').style.color = mode === 'human' ? '#e8edf7' : '#5ff3b4';
+  $('bWorld').classList.toggle('pri', mode === 'world');
+}
+function cloneNow() {
+  if (Policy.busy) return;
+  Trainer.addEpisode(Telemetry.frames);                 // include the run in progress
+  const eps = Trainer.episodes;
+  $('cBig').textContent = 'cloning…';
+  Policy.train(eps, LEVEL.walls,
+    p => $('cBig').textContent = `${(p * 100) | 0}%`,
+    m => {
+      if (m.error) { $('cBig').textContent = 'need more'; $('cSub').textContent = m.error; return; }
+      $('cBig').innerHTML = '<span class="green">trained</span>';
+      $('cSub').textContent = `held-out action error ${m.err.toFixed(2)} (normalised). Press C to hand over the controls.`;
+      $('cFrames').textContent = m.frames;
+      setDrive('auto');
+    });
+}
+$('bClone').onclick = () => Policy.trained ? setDrive(Policy.drive === 'auto' ? 'human' : 'auto') : cloneNow();
+$('bWorld').onclick = () => {
+  if (!Policy.trained) return cloneNow();
+  setDrive(Policy.drive === 'world' ? 'auto' : 'world');
+};
 $('bNext').onclick = () => Demo.next();
 $('bRestart').onclick = () => { reset(); if (camMode === 'fp') renderer.domElement.requestPointerLock(); };
 $('bAdv').onclick = () => {
@@ -595,6 +635,8 @@ addEventListener('keydown', e => {
   const k = e.key.toLowerCase();
   if (e.code === 'Space') { e.preventDefault(); Demo.next(); }
   else if (k === 't') trainNow();
+  else if (k === 'c') $('bClone').click();
+  else if (k === 'v') $('bWorld').click();
   else if (k === 'a') $('bAdv').click();
   else if (k === 'escape') $('study').style.display = 'none';
 });

@@ -103,7 +103,15 @@
     <div class="r" style="margin-top:9px"><span>runs logged</span><b id="dEps">0</b></div>
     <div class="r"><span>trajectory rows</span><b id="dRows">0</b></div>
   </div>
-  <!-- ACT 3 -->
+  <!-- ACT 3 : the cloned policy -->
+  <div id="p_clone" style="display:none">
+    <h4>CLONED POLICY</h4>
+    <div class="big" id="cBig">not trained</div>
+    <div class="sub" id="cSub">Behaviour cloning on your own (observation, action) pairs.</div>
+    <div class="r" style="margin-top:9px"><span>demo frames</span><b id="cFrames">0</b></div>
+    <div class="r"><span>driving</span><b id="cDrive">human</b></div>
+  </div>
+  <!-- ACT 4 -->
   <div id="p_race" style="display:none">
     <h4>SAME ROBOT, TWO PLANNERS</h4>
     <table id="raceTbl">
@@ -135,7 +143,9 @@
   <div class="r"><span>predictor</span><b id="aMode">physics</b></div>
   <div class="r"><span>ADE</span><b id="aAde">-</b></div>
   <div class="r"><span>FDE</span><b id="aFde">-</b></div>
-  <button id="bTrain">Train on my runs (T)</button>
+  <button id="bClone">Clone my driving (C)</button>
+  <button id="bWorld">Whole ward on it (V)</button>
+  <button id="bTrain">Train crowd predictor (T)</button>
   <button id="bStudy">Run stratified study</button>
   <button id="bData">Download dataset</button>
 </div>
@@ -162,6 +172,7 @@
 <script src="crowd.js"></script>
 <script src="telemetry.js"></script>
 <script src="predict.js"></script>
+<script src="policy.js"></script>
 <script src="robot.js"></script>
 <script src="study.js"></script>
 <script src="demo.js"></script>

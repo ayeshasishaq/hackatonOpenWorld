@@ -43,6 +43,28 @@ function createCrowd(level, solids) {
   return {
     agents,
     step(dt) {
+      // MULTI-AGENT MODE: every person runs the SAME policy cloned from the human.
+      // Each one observes its own neighbours egocentrically and picks its own
+      // action, so avoidance is negotiated rather than scripted. Falls through to
+      // the hand-written steering below whenever the policy is not driving.
+      if (typeof Policy !== 'undefined' && Policy.drive === 'world' && Policy.trained) {
+        for (const a of agents) {
+          if (a.heading === undefined) { a.heading = Math.atan2(a.vx, a.vz); a.spd = 0; }
+          const others = agents.filter(o => o !== a)
+            .map(o => ({ x: o.x, z: o.z, vx: o.vx, vz: o.vz }));
+          const act = Policy.act({ x: a.x, z: a.z, heading: a.heading, speed: a.spd },
+                                 others, { x: a.gx, z: a.gz }, level.walls);
+          a.spd = Math.max(-.6, Math.min(a.speed, a.spd + act.throttle * 3.2 * dt));
+          a.spd -= a.spd * 1.6 * dt;
+          a.heading -= act.steer * 2.4 * (a.spd / a.speed) * dt;
+          a.vx = -Math.sin(a.heading) * a.spd; a.vz = -Math.cos(a.heading) * a.spd;
+          const nx = a.x + a.vx * dt, nz = a.z + a.vz * dt;
+          if (!blocked(nx, a.z)) a.x = Math.max(-bx, Math.min(bx, nx)); else a.heading += 1.1 * dt;
+          if (!blocked(a.x, nz)) a.z = Math.max(-bz, Math.min(bz, nz)); else a.heading += 1.1 * dt;
+          if (Math.hypot(a.gx - a.x, a.gz - a.z) < 1.2) { const g = freeSpot(); a.gx = g.x; a.gz = g.z; }
+        }
+        return agents;
+      }
       for (const a of agents) {
         // seek own waypoint
         let sx = a.gx - a.x, sz = a.gz - a.z;

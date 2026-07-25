@@ -20,13 +20,17 @@ const LEVEL = {
     { x: 0,   z:  20, w: 28,  d: 0.6 },
     { x: -14, z: 0,   w: 0.6, d: 40  },
     { x: 14,  z: 0,   w: 0.6, d: 40  },
-    // corridor pinch points — these create the interesting avoidance moments
-    { x: -8,  z: 10,  w: 11,  d: 0.6 },
-    { x: 9,   z: 10,  w: 9,   d: 0.6 },
-    { x: -9,  z: 2,   w: 9,   d: 0.6 },
-    { x: 8,   z: 2,   w: 11,  d: 0.6 },
-    { x: -7,  z: -7,  w: 13,  d: 0.6 },
-    { x: 9,   z: -7,  w: 9,   d: 0.6 },
+    // Corridor pinch points: the interesting avoidance moments. Keep the doorways
+    // ~9 m wide and only gently offset from each other. The trolley is car-like and
+    // cannot strafe, so a narrow gap that is also offset from the previous one is
+    // effectively impassable. An earlier layout had a 5 m gap swung 3 m sideways
+    // and even a scripted expert only reached the OR 1 run in 6.
+    { x: -8.5, z: 10,  w: 11, d: 0.6 },   // doorway x in (-3, 6)
+    { x: 10,   z: 10,  w: 8,  d: 0.6 },
+    { x: -10,  z: 2,   w: 8,  d: 0.6 },   // doorway x in (-6, 3)
+    { x: 8.5,  z: 2,   w: 11, d: 0.6 },
+    { x: -8.5, z: -7,  w: 11, d: 0.6 },   // doorway x in (-3, 6)
+    { x: 10,   z: -7,  w: 8,  d: 0.6 },
     // side-room dividers
     { x: -10, z: 15,  w: 0.6, d: 9 },
     { x: 10,  z: 6,   w: 0.6, d: 8 },

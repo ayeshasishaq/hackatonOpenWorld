@@ -1,0 +1,141 @@
+// ============================================================================
+// OWNER: P1 / ML  —  THE CLONED POLICY  (this is where the AI actually lives)
+//
+// Behaviour cloning from human demonstrations. You drive; we record every
+// (observation, action) pair; we fit a policy to it; then that policy drives.
+//
+// Why this counts as physical AI rather than decoration:
+//   * It is the same recipe as pi0 / SmolVLA / GR00T, which are behaviour cloning
+//     from human demonstrations with a vision encoder and language on top. This
+//     is the honest minimal version: no vision, no language, trained in-browser.
+//   * The standard objection to human data for robot learning is that it is
+//     OBSERVATION WITHOUT ACTIONS. Ego4D and ETH/UCY show you where people went,
+//     never what they did. A game records the control input, so every frame is a
+//     real (observation, action) pair.
+//
+// Observations are EGOCENTRIC (everything rotated into the agent's own frame),
+// which is what lets one policy drive both the gurney and every person in the
+// ward. That turns the scene into a multi-agent avoidance problem where every
+// entity is running the same human-derived controller.
+// ============================================================================
+
+const P_NEIGH = 5;
+const P_IN = 1 + 2 + P_NEIGH * 4 + 3;    // speed, goal(2), neighbours(20), wall(3) = 26
+const P_OUT = 2;                          // throttle, steer
+
+// Observation for ANY entity: {x, z, heading, speed}. `others` is a list of
+// {x, z, vx, vz}. Rotating into the ego frame is what makes it transferable.
+function policyObs(e, others, goal, walls) {
+  const f = [];
+  // World -> ego as [forward, right]. Forward is -z rotated by heading, matching
+  // the trolley convention; right is that turned 90 degrees. Getting this wrong
+  // rotates every observation by 90 degrees and the policy cannot learn anything.
+  const hx = -Math.sin(e.heading), hz = -Math.cos(e.heading);   // forward
+  const rx = Math.cos(e.heading), rz = -Math.sin(e.heading);    // right
+  const toEgo = (dx, dz) => [dx * hx + dz * hz, dx * rx + dz * rz];
+
+  f.push(e.speed / 3.6);
+  const [gf, gl] = toEgo(goal.x - e.x, goal.z - e.z);
+  const gd = Math.hypot(gf, gl) || 1;
+  f.push(Math.min(gd / 20, 1.5), Math.atan2(gl, gf));             // distance, bearing
+
+  const near = others.map(o => {
+    const [ox, oz] = toEgo(o.x - e.x, o.z - e.z);
+    const [ovx, ovz] = toEgo(o.vx || 0, o.vz || 0);
+    return { d: Math.hypot(ox, oz), v: [ox, oz, ovx, ovz] };
+  }).sort((a, b) => a.d - b.d);
+  for (let i = 0; i < P_NEIGH; i++) {
+    const n = near[i];
+    if (n && n.d < 9) f.push(n.v[0], n.v[1], n.v[2], n.v[3]);
+    else f.push(9, 9, 0, 0);
+  }
+
+  let bx = 9, bz = 9, bd = 1e9;
+  for (const w of (walls || [])) {
+    const nx = Math.max(w.x - w.w / 2, Math.min(w.x + w.w / 2, e.x));
+    const nz = Math.max(w.z - w.d / 2, Math.min(w.z + w.d / 2, e.z));
+    const dx = e.x - nx, dz = e.z - nz, d = Math.hypot(dx, dz);
+    if (d < bd) { bd = d; [bx, bz] = toEgo(dx, dz); }
+  }
+  f.push(bx, bz, Math.min(bd, 6));
+  return f;
+}
+
+const Policy = {
+  net: null, norm: null, trained: false, busy: false, metrics: null,
+  drive: 'human',                 // 'human' | 'auto' | 'world'  (world = every agent)
+
+  act(e, others, goal, walls) {
+    if (!this.net) return { throttle: 0, steer: 0 };
+    const f = policyObs(e, others, goal, walls), n = this.norm;
+    const x = new Float32Array(P_IN);
+    for (let i = 0; i < P_IN; i++) x[i] = (f[i] - n.xm[i]) / n.xs[i];
+    const a = forward(this.net, x), o = a[a.length - 1];
+    return {
+      throttle: Math.max(-1, Math.min(1, o[0] * n.ys[0] + n.ym[0])),
+      steer:    Math.max(-1, Math.min(1, o[1] * n.ys[1] + n.ym[1])),
+    };
+  },
+
+  // Build (observation, action) pairs from the logged human runs.
+  dataset(episodes, walls) {
+    const X = [], Y = [];
+    for (const ep of episodes) {
+      for (const fr of ep) {
+        if (!fr.action || !fr.player) continue;
+        const p = fr.player;
+        const e = { x: p.x, z: p.z, heading: p.heading ?? Math.atan2(p.vx, p.vz), speed: p.speed ?? Math.hypot(p.vx, p.vz) };
+        const others = fr.crowd.map(a => ({ x: a[0], z: a[1], vx: a[2], vz: a[3] }));
+        X.push(policyObs(e, others, fr.goal, walls));
+        Y.push([fr.action.throttle, fr.action.steer]);
+      }
+    }
+    return { X, Y };
+  },
+
+  train(episodes, walls, onProgress, onDone) {
+    if (this.busy) return;
+    const { X, Y } = this.dataset(episodes, walls);
+    if (X.length < 150) { onDone({ error: `only ${X.length} demo frames, drive a bit more` }); return; }
+    this.busy = true;
+
+    const n = X.length;
+    const xm = new Float32Array(P_IN), xs = new Float32Array(P_IN);
+    const ym = new Float32Array(P_OUT), ys = new Float32Array(P_OUT);
+    for (const v of X) for (let i = 0; i < P_IN; i++) xm[i] += v[i] / n;
+    for (const v of X) for (let i = 0; i < P_IN; i++) xs[i] += (v[i] - xm[i]) ** 2 / n;
+    for (let i = 0; i < P_IN; i++) xs[i] = Math.sqrt(xs[i]) || 1;
+    for (const v of Y) for (let i = 0; i < P_OUT; i++) ym[i] += v[i] / n;
+    for (const v of Y) for (let i = 0; i < P_OUT; i++) ys[i] += (v[i] - ym[i]) ** 2 / n;
+    for (let i = 0; i < P_OUT; i++) ys[i] = Math.sqrt(ys[i]) || 1;
+    const norm = { xm, xs, ym, ys };
+
+    const Xn = X.map(v => Float32Array.from(v, (q, i) => (q - xm[i]) / xs[i]));
+    const Yn = Y.map(v => Float32Array.from(v, (q, i) => (q - ym[i]) / ys[i]));
+    const idx = [...Array(n).keys()];
+    for (let i = n - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0;[idx[i], idx[j]] = [idx[j], idx[i]]; }
+    const split = Math.floor(n * .85);
+    const net = makeNet([P_IN, 64, 64, P_OUT]);
+
+    const EPOCHS = 60;
+    let epoch = 0;
+    const step = () => {
+      for (let e = 0; e < 4 && epoch < EPOCHS; e++, epoch++) {
+        const lr = .008 * (1 - epoch / EPOCHS) + .0004;
+        for (let k = 0; k < split; k++) backward(net, forward(net, Xn[idx[k]]), Yn[idx[k]], lr);
+      }
+      onProgress(epoch / EPOCHS);
+      if (epoch < EPOCHS) return setTimeout(step, 0);
+      this.net = net; this.norm = norm; this.trained = true;
+      let err = 0, m = 0;                                    // held-out action error
+      for (let k = split; k < n; k++) {
+        const a = forward(net, Xn[idx[k]]), o = a[a.length - 1];
+        err += Math.hypot(o[0] - Yn[idx[k]][0], o[1] - Yn[idx[k]][1]); m++;
+      }
+      this.metrics = { frames: n, err: err / m };
+      this.busy = false;
+      onDone(this.metrics);
+    };
+    setTimeout(step, 0);
+  },
+};

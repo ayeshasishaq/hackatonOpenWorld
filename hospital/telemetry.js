@@ -35,7 +35,16 @@ const Telemetry = {
       player: { x: +s.player.x.toFixed(3), z: +s.player.z.toFixed(3),
                 vx: +s.player.vx.toFixed(3), vz: +s.player.vz.toFixed(3),
                 yaw: +s.player.yaw.toFixed(3),                 // head orientation (HST input)
+                heading: +(s.player.heading ?? 0).toFixed(3),
+                speed: +(s.player.speed ?? 0).toFixed(3),
                 gaze: +Math.atan2(s.goal.z - s.player.z, s.goal.x - s.player.x).toFixed(3) },
+      // THE ACTION LABEL. Human trajectory datasets (Ego4D, ETH/UCY) are
+      // observation-only, which is the standard objection to using human data for
+      // robot learning: you see where someone went, not what they did. A game
+      // records the control input itself, so every frame here is a genuine
+      // (observation, action) pair, the same shape imitation learning needs.
+      action: { throttle: +(s.action?.throttle ?? 0).toFixed(2),
+                steer: +(s.action?.steer ?? 0).toFixed(2) },
       goal: { x: s.goal.x, z: s.goal.z },
       nearest: +s.nearest.toFixed(3), collided: s.collided, nearMiss: s.nearMiss,
       vitals: +s.health.toFixed(1),
