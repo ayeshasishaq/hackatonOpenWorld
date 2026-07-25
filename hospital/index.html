@@ -1,0 +1,75 @@
+<!doctype html><html><head><meta charset="utf-8">
+<title>Code Blue — first-person hospital navigation data engine</title>
+<style>
+ html,body{margin:0;height:100%;background:#05060a;color:#e8edf7;overflow:hidden;
+   font-family:system-ui,-apple-system,sans-serif}
+ canvas{display:block}
+ .panel{position:fixed;background:rgba(14,18,28,.82);border:1px solid rgba(120,140,190,.18);
+   border-radius:12px;backdrop-filter:blur(10px);z-index:10}
+ #hud{top:14px;left:50%;transform:translateX(-50%);padding:10px 18px;text-align:center;font-size:14px}
+ #hud b{font-variant-numeric:tabular-nums}
+ #vitals{top:14px;right:14px;padding:12px 14px;width:190px;font-size:12px;
+   font-family:ui-monospace,Menlo,monospace}
+ #vitals .r{display:flex;justify-content:space-between;padding:2px 0;color:#8792ad}
+ #vitals .r b{color:#e8edf7;font-weight:500}
+ #bar{height:6px;border-radius:3px;background:#2a3350;margin-top:8px;overflow:hidden}
+ #barf{height:100%;width:100%;background:linear-gradient(90deg,#ff5a5a,#5ff3b4);transition:width .2s}
+ #btns{bottom:14px;left:50%;transform:translateX(-50%);padding:8px}
+ button{margin:0 3px;padding:8px 13px;background:rgba(255,255,255,.05);color:#e8edf7;
+   border:1px solid rgba(120,140,190,.25);border-radius:8px;cursor:pointer;font-size:12.5px}
+ button:hover{background:rgba(255,255,255,.1)}
+ button.on{background:#38e1ff;color:#04222c;border-color:transparent}
+ #start{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+   flex-direction:column;background:rgba(5,6,10,.92);z-index:30;text-align:center;cursor:pointer}
+ #start h1{font-size:30px;margin:0 0 6px;letter-spacing:-.5px}
+ #start p{color:#8792ad;margin:4px 0;font-size:14px;max-width:520px;line-height:1.5}
+ #start .go{margin-top:18px;padding:12px 26px;background:#38e1ff;color:#04222c;
+   border-radius:9px;font-weight:600;font-size:15px}
+ #over{position:fixed;inset:0;display:none;align-items:center;justify-content:center;
+   flex-direction:column;background:rgba(5,6,10,.85);z-index:25;text-align:center}
+ #over h2{font-size:26px;margin:0 0 8px}
+ #over p{color:#8792ad;font-size:14px;margin:3px}
+ #xhair{position:fixed;top:50%;left:50%;width:5px;height:5px;margin:-2.5px 0 0 -2.5px;
+   border-radius:50%;background:rgba(255,255,255,.5);z-index:9;pointer-events:none}
+</style>
+<script type="importmap">{"imports":{
+  "three":"https://unpkg.com/three@0.160.0/build/three.module.js",
+  "three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}</script>
+</head><body>
+
+<div id="xhair"></div>
+<div id="hud" class="panel">Get the patient to the <b style="color:#5ff3b4">OR</b> — <b id="dist">—</b> away</div>
+
+<div id="vitals" class="panel">
+  <div class="r"><span>patient</span><b id="vState">STABLE</b></div>
+  <div id="bar"><div id="barf"></div></div>
+  <div class="r" style="margin-top:8px"><span>time</span><b id="vTime">0.0s</b></div>
+  <div class="r"><span>collisions</span><b id="vHit">0</b></div>
+  <div class="r"><span>near-misses</span><b id="vMiss">0</b></div>
+  <div class="r"><span>frames logged</span><b id="vLog">0</b></div>
+</div>
+
+<div id="btns" class="panel">
+  <button id="bPredict" class="on">Prediction overlay</button>
+  <button id="bRestart">Restart</button>
+  <button id="bData">Download data</button>
+</div>
+
+<div id="over"></div>
+
+<div id="start">
+  <h1>CODE BLUE</h1>
+  <p><b>Push the gurney to the operating room.</b> The corridors are full of moving staff.
+     Don't hit anyone — every jolt costs the patient.</p>
+  <p style="color:#5ff3b4">Every run records human collision-avoidance trajectories in the
+     ETH/UCY format that Social GAN and Human Scene Transformer train on.</p>
+  <p><b>WASD</b> to move · <b>mouse</b> to look · <b>Esc</b> to release cursor</p>
+  <div class="go">Click to start</div>
+</div>
+
+<script src="level.js"></script>
+<script src="crowd.js"></script>
+<script src="telemetry.js"></script>
+<script src="predict.js"></script>
+<script type="module" src="game.js"></script>
+</body></html>
