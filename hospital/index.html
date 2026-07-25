@@ -25,6 +25,9 @@
  #start p{color:#8792ad;margin:4px 0;font-size:14px;max-width:520px;line-height:1.5}
  #start .go{margin-top:18px;padding:12px 26px;background:#38e1ff;color:#04222c;
    border-radius:9px;font-weight:600;font-size:15px}
+ #start .go.wait{background:#2a3350;color:#8792ad}
+ #credits{margin-top:22px;font-size:11.5px;color:#5d6880}
+ #credits a{color:#7c88a3}
  #over{position:fixed;inset:0;display:none;align-items:center;justify-content:center;
    flex-direction:column;background:rgba(5,6,10,.85);z-index:25;text-align:center}
  #over h2{font-size:26px;margin:0 0 8px}
@@ -64,9 +67,14 @@
   <p style="color:#5ff3b4">Every run records human collision-avoidance trajectories in the
      ETH/UCY format that Social GAN and Human Scene Transformer train on.</p>
   <p><b>WASD</b> to move · <b>mouse</b> to look · <b>Esc</b> to release cursor</p>
-  <div class="go">Click to start</div>
+  <div id="go" class="go wait">Loading models…</div>
+  <div id="credits">3D models from <a href="https://poly.pizza" target="_blank">Poly Pizza</a> —
+    CC0 and CC-BY by Kenney, Quaternius, CreativeTrio, Poly by Google, Jarlan Perez, dook,
+    J-Toastie, Steve B, li chang, jeremy, Alex Safayan, Armory_3D.
+    <a href="../assets/ATTRIBUTION.md" target="_blank">Full attribution</a></div>
 </div>
 
+<script src="assets.js"></script>
 <script src="level.js"></script>
 <script src="crowd.js"></script>
 <script src="telemetry.js"></script>

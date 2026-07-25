@@ -6,6 +6,8 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
+Assets.init(THREE, GLTFLoader);
+
 // ---------- renderer / scene ----------
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -14,8 +16,8 @@ renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadow
 document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x05060a);
-scene.fog = new THREE.Fog(0x05060a, 12, 46);
+scene.background = new THREE.Color(0x0c1220);
+scene.fog = new THREE.Fog(0x0c1220, 20, 62);   // far enough back to see the props
 const camera = new THREE.PerspectiveCamera(72, innerWidth / innerHeight, 0.1, 200);
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
@@ -23,17 +25,23 @@ addEventListener('resize', () => {
 });
 
 // ---------- lights ----------
-scene.add(new THREE.HemisphereLight(0x4a5a7a, 0x0a0c14, 0.75));
-const key = new THREE.DirectionalLight(0xffffff, 0.55);
+// The GLB props are flat-shaded with baked-in colour, so they read as
+// silhouettes unless the ambient term is well up.
+scene.add(new THREE.HemisphereLight(0x9db4d8, 0x39445c, 1.5));
+const key = new THREE.DirectionalLight(0xffffff, 0.9);
 key.position.set(6, 20, 8); key.castShadow = true;
 key.shadow.mapSize.set(2048, 2048);
 Object.assign(key.shadow.camera, { left: -22, right: 22, top: 26, bottom: -26, near: 1, far: 60 });
 scene.add(key);
 // ceiling strip lights down the corridor
 for (let z = -18; z <= 18; z += 6) {
-  const l = new THREE.PointLight(0xbfd8ff, 26, 16, 2); l.position.set(0, 4.2, z); scene.add(l);
+  const l = new THREE.PointLight(0xbfd8ff, 40, 22, 2); l.position.set(0, 4.2, z); scene.add(l);
   const s = new THREE.Mesh(new THREE.BoxGeometry(2.4, .1, .3),
     new THREE.MeshBasicMaterial({ color: 0xdce9ff })); s.position.set(0, 4.3, z); scene.add(s);
+}
+// the side bays are off the lit corridor, so give each one its own ceiling lamp
+for (const [x, z] of [[-12, 14], [12, 6], [-12, -2], [-12, -14], [11, -16]]) {
+  const l = new THREE.PointLight(0xcfe0ff, 22, 14, 2); l.position.set(x, 3.4, z); scene.add(l);
 }
 const orLight = new THREE.PointLight(0x5ff3b4, 90, 26, 2);
 orLight.position.set(LEVEL.goal.x, 4, LEVEL.goal.z); scene.add(orLight);
@@ -41,18 +49,29 @@ orLight.position.set(LEVEL.goal.x, 4, LEVEL.goal.z); scene.add(orLight);
 // ---------- static world ----------
 const floor = new THREE.Mesh(
   new THREE.PlaneGeometry(LEVEL.bounds.x * 2, LEVEL.bounds.z * 2),
-  new THREE.MeshStandardMaterial({ color: 0x161c28, roughness: .92 }));
+  new THREE.MeshStandardMaterial({ color: 0x39435c, roughness: .85 }));
 floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
-const grid = new THREE.GridHelper(Math.max(LEVEL.bounds.x, LEVEL.bounds.z) * 2, 28, 0x27324a, 0x1c2434);
-grid.position.y = .02; grid.material.transparent = true; grid.material.opacity = .35; scene.add(grid);
+const grid = new THREE.GridHelper(Math.max(LEVEL.bounds.x, LEVEL.bounds.z) * 2, 28, 0x4a5878, 0x3b4763);
+grid.position.y = .02; grid.material.transparent = true; grid.material.opacity = .22; scene.add(grid);
 
-const wallMat = new THREE.MeshStandardMaterial({ color: 0x2a3346, roughness: .85 });
+const wallMat = new THREE.MeshStandardMaterial({ color: 0x5c6884, roughness: .8 });
 for (const w of LEVEL.walls) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w.w, 3.2, w.d), wallMat);
   m.position.set(w.x, 1.6, w.z); m.castShadow = m.receiveShadow = true; scene.add(m);
 }
-const SOLIDS = buildFurniture(THREE, scene);
-loadProps(THREE, scene, GLTFLoader);          // async; safe if PROPS is empty
+// GLB props from ../assets/models. Wait up to 15s, then dress the ward with
+// whatever arrived; missing keys are skipped by buildProps / Assets.make.
+// Only if nothing loaded do we fall back to the primitive furniture.
+const preloadKeys = [...propKeys(), 'gurney', ...Object.values(kindModels())];
+const preloadP = Assets.preload(preloadKeys);
+await Promise.race([
+  preloadP,
+  new Promise(r => setTimeout(r, 15000)),
+]);
+if (Assets.loaded < preloadKeys.length)
+  console.warn('[assets] ready with', Assets.loaded, '/', preloadKeys.length,
+               Assets.failed.length ? '; missing: ' + Assets.failed.join(', ') : '');
+const SOLIDS = Assets.loaded ? buildProps(THREE, scene) : buildFurniture(THREE, scene);
 
 // OR goal marker
 const goalDisc = new THREE.Mesh(
@@ -65,38 +84,68 @@ const goalBeam = new THREE.Mesh(
 goalBeam.position.set(LEVEL.goal.x, 4, LEVEL.goal.z); scene.add(goalBeam);
 
 // ---------- the gurney you push (visible in front of the camera) ----------
-const gurney = new THREE.Group();
-{
+const gurney = Assets.make('gurney') || buildBoxGurney();
+scene.add(gurney);
+
+function buildBoxGurney() {                    // stand-in if the GLB is missing
+  const g = new THREE.Group();
   const frame = new THREE.Mesh(new THREE.BoxGeometry(1.0, .12, 2.0),
     new THREE.MeshStandardMaterial({ color: 0xcfd8e8, metalness: .5, roughness: .35 }));
-  frame.position.y = .78; gurney.add(frame);
+  frame.position.y = .78; g.add(frame);
   const body = new THREE.Mesh(new THREE.CapsuleGeometry(.28, 1.0, 4, 10),
     new THREE.MeshStandardMaterial({ color: 0x8fa8c8 }));
-  body.rotation.x = Math.PI / 2; body.position.set(0, .98, -.1); gurney.add(body);
+  body.rotation.x = Math.PI / 2; body.position.set(0, .98, -.1); g.add(body);
   const blanket = new THREE.Mesh(new THREE.BoxGeometry(.9, .1, 1.1),
-    new THREE.MeshStandardMaterial({ color: 0x2f6fbf })); blanket.position.set(0, .93, .2); gurney.add(blanket);
+    new THREE.MeshStandardMaterial({ color: 0x2f6fbf })); blanket.position.set(0, .93, .2); g.add(blanket);
   for (const [dx, dz] of [[-.42, -.85], [.42, -.85], [-.42, .85], [.42, .85]]) {
     const w = new THREE.Mesh(new THREE.CylinderGeometry(.1, .1, .07, 12),
       new THREE.MeshStandardMaterial({ color: 0x222833 }));
-    w.rotation.z = Math.PI / 2; w.position.set(dx, .12, dz); gurney.add(w);
+    w.rotation.z = Math.PI / 2; w.position.set(dx, .12, dz); g.add(w);
   }
+  return g;
 }
-scene.add(gurney);
 
 // ---------- crowd meshes ----------
 const KIND_COLOR = { nurse: 0x5fb0f3, patient: 0xd8dce6, rusher: 0xffc24d };
 let crowd, crowdMeshes = [];
+
+// One staff model per kind, so the corridor isn't 22 copies of one person.
+// Declared as a function because the preload above runs before this section.
+function kindModels() {
+  return { nurse: 'staff_nurse', patient: 'staff_doctor', rusher: 'staff_surgeon' };
+}
+
 function buildCrowdMeshes() {
   crowdMeshes.forEach(m => scene.remove(m)); crowdMeshes = [];
+  const models = kindModels(), tinted = new Map();
   crowd.agents.forEach(a => {
-    const g = new THREE.Group();
-    const body = new THREE.Mesh(new THREE.CapsuleGeometry(.26, .95, 4, 10),
-      new THREE.MeshStandardMaterial({ color: KIND_COLOR[a.kind] || 0x9aa4b8, roughness: .7 }));
-    body.position.y = .78; body.castShadow = true; g.add(body);
-    const head = new THREE.Mesh(new THREE.SphereGeometry(.2, 16, 12),
-      new THREE.MeshStandardMaterial({ color: 0xe7d3bd })); head.position.y = 1.5; g.add(head);
+    const g = Assets.make(models[a.kind]) || buildCapsulePerson(a.kind);
+    // A light tint toward the kind colour keeps nurse / patient / rusher
+    // readable at a glance without washing out the scrubs and coats the models
+    // already wear. Tinted materials are cached per kind so the whole crowd
+    // still shares a handful of them.
+    const tint = new THREE.Color(KIND_COLOR[a.kind] || 0x9aa4b8);
+    g.traverse(o => {
+      if (!o.isMesh) return;
+      const cacheKey = a.kind + o.material.uuid;      // key on the shared original
+      const cached = tinted.get(cacheKey);
+      if (cached) { o.material = cached; return; }
+      o.material = o.material.clone();
+      o.material.color.lerp(tint, .18);
+      tinted.set(cacheKey, o.material);
+    });
     scene.add(g); crowdMeshes.push(g);
   });
+}
+
+function buildCapsulePerson(kind) {            // stand-in if the GLB is missing
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(.26, .95, 4, 10),
+    new THREE.MeshStandardMaterial({ color: KIND_COLOR[kind] || 0x9aa4b8, roughness: .7 }));
+  body.position.y = .78; body.castShadow = true; g.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(.2, 16, 12),
+    new THREE.MeshStandardMaterial({ color: 0xe7d3bd })); head.position.y = 1.5; g.add(head);
+  return g;
 }
 
 // ---------- prediction overlay ----------
@@ -241,6 +290,10 @@ $('bPredict').onclick = () => {
   $('bPredict').classList.toggle('on', showPredict);
   if (!showPredict) predGroup.clear();
 };
+// This module top-level-awaits the models, so reaching here means the world is
+// dressed — only now does the overlay become clickable.
+$('go').textContent = 'Click to start';
+$('go').classList.remove('wait');
 $('start').onclick = () => {
   $('start').style.display = 'none'; started = true;
   renderer.domElement.requestPointerLock();

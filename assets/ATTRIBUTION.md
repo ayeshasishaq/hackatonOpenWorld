@@ -3,6 +3,15 @@
 3D models loaded by this project, all free to use.
 CC0 models need no credit; CC-BY models must keep the credit below.
 
+## First-party (no attribution needed)
+
+Built from scratch by `tools/make_staff_models.mjs`, modelled on our own outfit
+reference sheet. Re-run the script to change them — do not hand-edit the GLBs.
+
+- `staff_doctor` — white coat over blue scrubs
+- `staff_surgeon` — white coat, surgical cap and mask, stethoscope
+- `staff_nurse` — blue scrubs, surgical cap and mask
+
 ## CC0
 
 - **Trashcan** by Kenney — [https://poly.pizza/m/eoC8NFaafh](https://poly.pizza/m/eoC8NFaafh) (used as `biohazard_bin`)
