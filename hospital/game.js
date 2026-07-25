@@ -124,31 +124,48 @@ function drawPredictions(preds) {
   }
 }
 
-// ---------- player state + first-person controls ----------
-const SPEED = 3.4, PR = .62, EYE = 1.6, PITCH = -0.13;   // yaw 0 = looking down -z, toward the OR
-const player = { x: LEVEL.spawn.x, z: LEVEL.spawn.z, vx: 0, vz: 0, yaw: 0 };
+// ---------- the gurney IS the vehicle: car-like (bicycle) model ----------
+// You push from behind. Wheels only steer while rolling, so it handles like a real trolley.
+const MAX_FWD = 3.6, MAX_REV = 1.2, ACCEL = 6.0, DRAG = 1.8, TURN = 2.2;
+const BED_R = .5, BED_HALF = .9;          // trolley = capsule: radius + half its length
+const PUSH = 1.7, EYE = 1.6, PITCH = -0.1;
+const bed = { x: LEVEL.spawn.x, z: LEVEL.spawn.z, heading: 0, speed: 0 };  // heading 0 = -z, toward the OR
+let headYaw = 0;                          // mouse look, decoupled from where the bed points
 camera.rotation.order = 'YXZ';
 const keys = {};
 addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; if (e.key === ' ') e.preventDefault(); });
 addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
 renderer.domElement.addEventListener('click', () => renderer.domElement.requestPointerLock());
 addEventListener('mousemove', e => {
-  if (document.pointerLockElement === renderer.domElement) player.yaw -= e.movementX * 0.0022;
+  if (document.pointerLockElement === renderer.domElement)
+    headYaw = clamp(headYaw - e.movementX * 0.0022, -1.25, 1.25);   // glance around, keep driving
 });
 
-function hitsWall(x, z) {
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+function hitsWall(x, z, r = BED_R) {
   for (const w of LEVEL.walls)
-    if (Math.abs(x - w.x) < w.w / 2 + PR && Math.abs(z - w.z) < w.d / 2 + PR) return true;
-  for (const s of SOLIDS) if (Math.hypot(x - s.x, z - s.z) < s.r + PR) return true;
+    if (Math.abs(x - w.x) < w.w / 2 + r && Math.abs(z - w.z) < w.d / 2 + r) return true;
+  for (const s of SOLIDS) if (Math.hypot(x - s.x, z - s.z) < s.r + r) return true;
   return false;
+}
+// the trolley is long, so test both ends or it clips corners
+function bedBlocked(x, z, fx, fz) {
+  return hitsWall(x + fx * BED_HALF, z + fz * BED_HALF) ||
+         hitsWall(x - fx * BED_HALF, z - fz * BED_HALF);
+}
+// closest point on the trolley's long axis to (px,pz) — used for person collisions
+function bedClosest(px, pz, fx, fz) {
+  const t = clamp((px - bed.x) * fx + (pz - bed.z) * fz, -BED_HALF, BED_HALF);
+  return { x: bed.x + fx * t, z: bed.z + fz * t };
 }
 
 // ---------- run state ----------
 let health, running, started, t0, tick, wasHit, stats;
 function reset() {
   crowd = createCrowd(LEVEL, SOLIDS); buildCrowdMeshes();
-  player.x = LEVEL.spawn.x; player.z = LEVEL.spawn.z; player.yaw = 0;
-  player.vx = player.vz = 0;
+  bed.x = LEVEL.spawn.x; bed.z = LEVEL.spawn.z; bed.heading = 0; bed.speed = 0;
+  headYaw = 0;
   health = 100; running = true; wasHit = false; tick = 0;
   stats = { hit: 0, miss: 0 }; Telemetry.reset(); t0 = performance.now();
   document.getElementById('over').style.display = 'none';
@@ -160,26 +177,41 @@ const clock = new THREE.Clock();
 function loop() {
   const dt = Math.min(clock.getDelta(), .05);
   if (started && running) {
-    // ---- movement (relative to where you're looking) ----
-    const f = (keys['w'] || keys['arrowup'] ? 1 : 0) - (keys['s'] || keys['arrowdown'] ? 1 : 0);
-    const r = (keys['d'] || keys['arrowright'] ? 1 : 0) - (keys['a'] || keys['arrowleft'] ? 1 : 0);
-    const sin = Math.sin(player.yaw), cos = Math.cos(player.yaw);
-    let dx = (-sin * f + cos * r), dz = (-cos * f - sin * r);
-    const m = Math.hypot(dx, dz) || 1;
-    player.vx = dx / m * SPEED * (f || r ? 1 : 0);
-    player.vz = dz / m * SPEED * (f || r ? 1 : 0);
-    const nx = player.x + player.vx * dt, nz = player.z + player.vz * dt;
-    if (!hitsWall(nx, player.z)) player.x = nx;
-    if (!hitsWall(player.x, nz)) player.z = nz;
+    // ---- trolley physics: W/S drive, A/D steer the wheels ----
+    const throttle = (keys['w'] || keys['arrowup'] ? 1 : 0) - (keys['s'] || keys['arrowdown'] ? 1 : 0);
+    const steer    = (keys['d'] || keys['arrowright'] ? 1 : 0) - (keys['a'] || keys['arrowleft'] ? 1 : 0);
+    bed.speed += throttle * ACCEL * dt;
+    bed.speed -= bed.speed * DRAG * dt;                       // rolling friction / coast
+    if (!throttle && Math.abs(bed.speed) < .05) bed.speed = 0;
+    bed.speed = clamp(bed.speed, -MAX_REV, MAX_FWD);
+    // wheels bite only while rolling; steering naturally inverts when reversing
+    bed.heading += steer * TURN * (bed.speed / MAX_FWD) * dt;
 
-    // ---- crowd + contact ----
+    const fx = -Math.sin(bed.heading), fz = -Math.cos(bed.heading);
+    const nx = bed.x + fx * bed.speed * dt, nz = bed.z + fz * bed.speed * dt;
+    if (!bedBlocked(nx, bed.z, fx, fz)) bed.x = nx; else bed.speed *= .25;
+    if (!bedBlocked(bed.x, nz, fx, fz)) bed.z = nz; else bed.speed *= .25;
+
+    // ---- crowd + SOLID contact (you cannot drive through people) ----
     const agents = crowd.step(dt);
     let nearest = 1e9;
-    agents.forEach((a, i) => {
+    for (let i = 0; i < agents.length; i++) {
+      const a = agents[i];
+      const c = bedClosest(a.x, a.z, fx, fz);
+      let dx = a.x - c.x, dz = a.z - c.z, d = Math.hypot(dx, dz);
+      const minD = BED_R + a.r;
+      if (d < minD) {                                   // impact: shove them, lose momentum
+        if (d < 1e-4) { dx = fx; dz = fz; d = 1; }
+        const ux = dx / d, uz = dz / d, pen = minD - d;
+        a.x += ux * pen; a.z += uz * pen;               // person is pushed clear of the trolley
+        a.vx += ux * 2.2; a.vz += uz * 2.2;             // and stumbles aside
+        bed.x -= ux * pen * .35; bed.z -= uz * pen * .35;
+        bed.speed *= .45;                               // the trolley jolts almost to a stop
+      }
       crowdMeshes[i].position.set(a.x, 0, a.z);
       if (Math.hypot(a.vx, a.vz) > .1) crowdMeshes[i].rotation.y = Math.atan2(a.vx, a.vz);
-      nearest = Math.min(nearest, Math.hypot(player.x - a.x, player.z - a.z) - a.r - PR);
-    });
+      nearest = Math.min(nearest, d - minD);
+    }
     const collided = nearest < 0, nearMiss = nearest >= 0 && nearest < .45;
     if (collided && !wasHit) { health -= 9; stats.hit++; }
     if (nearMiss && !wasHit) stats.miss++;
@@ -187,16 +219,19 @@ function loop() {
     health -= dt * 1.6;                                    // the patient is deteriorating
 
     // ---- prediction overlay ----
-    drawPredictions(Predictor.predict(agents, player));
+    drawPredictions(Predictor.predict(agents, bed));
 
-    // ---- log (~10 Hz) ----
+    // ---- log (~10 Hz).  yaw = head orientation, which now differs from travel
+    //      direction: exactly the extra signal Human Scene Transformer uses.
     if (tick % 6 === 0) Telemetry.record({
-      t: (performance.now() - t0) / 1000, player, goal: LEVEL.goal, crowd: agents,
-      nearest, collided, nearMiss, health });
+      t: (performance.now() - t0) / 1000,
+      player: { x: bed.x, z: bed.z, vx: fx * bed.speed, vz: fz * bed.speed,
+                yaw: bed.heading + headYaw },
+      goal: LEVEL.goal, crowd: agents, nearest, collided, nearMiss, health });
     tick++;
 
-    // ---- hud ----
-    const d = Math.hypot(player.x - LEVEL.goal.x, player.z - LEVEL.goal.z);
+    // ---- hud ---- (distance measured from the BED: the patient is what must arrive)
+    const d = Math.hypot(bed.x - LEVEL.goal.x, bed.z - LEVEL.goal.z);
     $('dist').textContent = d.toFixed(1) + ' m';
     $('vTime').textContent = ((performance.now() - t0) / 1000).toFixed(1) + 's';
     $('vHit').textContent = stats.hit; $('vMiss').textContent = stats.miss;
@@ -209,11 +244,12 @@ function loop() {
     else if (health <= 0) finish(false);
   }
 
-  // camera follows the player's head; gurney sits just in front
-  camera.position.set(player.x, EYE, player.z);
-  camera.rotation.set(PITCH, player.yaw, 0);
-  gurney.position.set(player.x - Math.sin(player.yaw) * 2.1, 0, player.z - Math.cos(player.yaw) * 2.1);
-  gurney.rotation.y = player.yaw;
+  // you walk BEHIND the trolley; your head can look around independently
+  const cfx = -Math.sin(bed.heading), cfz = -Math.cos(bed.heading);
+  camera.position.set(bed.x - cfx * PUSH, EYE, bed.z - cfz * PUSH);
+  camera.rotation.set(PITCH, bed.heading + headYaw, 0);
+  gurney.position.set(bed.x, 0, bed.z);
+  gurney.rotation.y = bed.heading;
   goalDisc.rotation.y += dt * .6;
 
   renderer.render(scene, camera);
@@ -226,11 +262,19 @@ function finish(won) {
   const s = Telemetry.summary(), secs = ((performance.now() - t0) / 1000).toFixed(1);
   const o = $('over');
   o.innerHTML = `<h2 style="color:${won ? '#5ff3b4' : '#ff5a5a'}">
-      ${won ? 'Patient delivered to the OR' : 'Patient lost'}</h2>
+      ${won ? 'PATIENT DELIVERED' : 'PATIENT LOST'}</h2>
     <p>${secs}s · ${stats.hit} collisions · ${stats.miss} near-misses</p>
     <p style="color:#5ff3b4">${s.rows} trajectory rows logged across ${s.frames} frames</p>
-    <p>Download data &rarr; ETH/UCY format, ready for Social GAN / HST</p>`;
+    <p style="font-size:12px;color:#6c7a95;max-width:430px">ETH/UCY format, ready for
+       Social GAN and Human Scene Transformer</p>
+    <div style="margin-top:14px">
+      <button id="bAgain">Try again</button>
+      <button id="bDl">Download data</button>
+    </div>`;
   o.style.display = 'flex';
+  // these live INSIDE the overlay: #over sits above #btns, so the bottom bar is unclickable here
+  $('bAgain').onclick = () => { reset(); renderer.domElement.requestPointerLock(); };
+  $('bDl').onclick = () => Telemetry.download();
 }
 
 // ---------- ui ----------
