@@ -19,23 +19,23 @@ const Demo = {
   ACTS: [
     { id: 'play', title: 'THE JOB',
       caption: 'A trauma patient has to cross a busy ward to the operating room.',
-      panel: 'vitals', camera: 'fp', hint: 'W S drive · A D steer · mouse look' },
+      panel: 'vitals', camera: 'fp', hint: '' },
 
     { id: 'data', title: 'EVERY FRAME IS A TRAINING PAIR',
       caption: 'We log what the driver saw and what the driver DID. Human datasets have the first and not the second.',
-      panel: 'data', camera: 'fp', hint: 'press T to train the crowd predictor' },
+      panel: 'data', camera: 'fp', hint: '' },
 
     { id: 'clone', title: 'NOW IT DRIVES ITSELF',
       caption: 'A policy cloned from those demonstrations is in the driving seat. Same recipe as pi0 and SmolVLA, without the vision encoder.',
-      panel: 'clone', camera: 'fp', hint: 'press C to hand over · V for the whole ward' },
+      panel: 'clone', camera: 'fp', hint: '' },
 
     { id: 'robot', title: 'SAME ROBOT. SAME CROWD.',
       caption: 'Only the planner differs. Amber plans on where people are now. Green plans on where they will be.',
-      panel: 'race', camera: 'overhead', hint: 'watch the amber one freeze' },
+      panel: 'race', camera: 'overhead', hint: 'amber plans on now, green plans ahead' },
 
     { id: 'honest', title: 'WHERE IT DOES NOT WORK',
       caption: 'In open space prediction is a clean win. In tight corridors it trades safety for throughput. The freezing robot problem is still open.',
-      panel: 'honest', camera: 'overhead', hint: 'press A for the full study' },
+      panel: 'honest', camera: 'overhead', hint: '' },
   ],
 
   // Hands-off timeline. Each entry fires once, when the clock passes `at`.

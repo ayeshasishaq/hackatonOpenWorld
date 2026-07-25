@@ -331,10 +331,15 @@ camera.rotation.order = 'YXZ';
 const keys = {};
 addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; if (e.key === ' ') e.preventDefault(); });
 addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
-renderer.domElement.addEventListener('click', () => renderer.domElement.requestPointerLock());
+// Look around by DRAGGING, not by locking the pointer. Pointer lock hijacks the
+// cursor and needs Escape to get out, which nobody discovers. Dragging is a
+// convention people already know, and it leaves every button clickable.
+let dragging = false;
+renderer.domElement.addEventListener('mousedown', () => dragging = true);
+addEventListener('mouseup', () => dragging = false);
 addEventListener('mousemove', e => {
-  if (document.pointerLockElement === renderer.domElement)
-    headYaw = clamp(headYaw - e.movementX * 0.0022, -1.25, 1.25);   // glance around, keep driving
+  if (dragging && camMode === 'fp')
+    headYaw = clamp(headYaw - e.movementX * 0.004, -1.25, 1.25);    // glance around, keep driving
 });
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -510,7 +515,6 @@ function loop() {
 
 function finish(won) {
   running = false;
-  document.exitPointerLock?.();
   Trainer.addEpisode(Telemetry.frames);        // keep the run as training data
   const s = Telemetry.summary(), secs = ((performance.now() - t0) / 1000).toFixed(1);
   const o = $('over');
@@ -526,7 +530,7 @@ function finish(won) {
     </div>`;
   o.style.display = 'flex';
   // these live INSIDE the overlay, which sits above the control bar
-  $('bAgain').onclick = () => { o.style.display = 'none'; reset(); renderer.domElement.requestPointerLock(); };
+  $('bAgain').onclick = () => { o.style.display = 'none'; reset(); };
   $('bOnward').onclick = () => { o.style.display = 'none'; Demo.go(1); };
 }
 
@@ -535,7 +539,11 @@ function finish(won) {
 // mechanics, so the three minutes go on the story instead.
 Demo.onEnter = a => {
   camMode = a.camera;
-  $('xhair').style.display = a.camera === 'fp' ? 'block' : 'none';
+  $('xhair').style.display = 'none';
+  // Key legend only while the human is actually driving. During the hands-off
+  // demo there is nothing to press, so showing controls would just confuse.
+  $('keys').style.display = (a.camera === 'fp' && !Demo.auto && Policy.drive === 'human')
+    ? 'block' : 'none';
   gurney.visible = a.camera === 'fp';
   if (a.id === 'robot') {                       // start the race clean and side by side
     for (const k of ['naive', 'predictive']) BOTS[k].stats = { hits: 0, stall: 0, t: 0 };
@@ -551,7 +559,6 @@ Demo.onEnter = a => {
     if (open.length) $('hBig').textContent =
       '+' + Math.round(Math.max(...open.map(r => r.hitGain))) + '%';
   }
-  if (a.camera === 'fp' && started) renderer.domElement.requestPointerLock();
 };
 
 function trainNow() {
@@ -715,7 +722,7 @@ $('bCard').onclick = showCard;
 $('kClose').onclick = () => $('card').style.display = 'none';
 
 $('bNext').onclick = () => Demo.next();
-$('bRestart').onclick = () => { reset(); if (camMode === 'fp') renderer.domElement.requestPointerLock(); };
+$('bRestart').onclick = () => reset();
 $('bAdv').onclick = () => {
   const a = $('adv'); a.style.display = a.style.display === 'block' ? 'none' : 'block';
 };
@@ -782,8 +789,7 @@ Demo.onCue = cue => {
         <button id="bTake">Drive it yourself</button></div>`;
     $('over').style.display = 'flex';
     $('bReplay').onclick = () => { $('over').style.display = 'none'; startAuto(); };
-    $('bTake').onclick = () => { $('over').style.display = 'none'; Demo.stopAuto();
-      Policy.drive = 'human'; reset(); Demo.go(0); renderer.domElement.requestPointerLock(); };
+    $('bTake').onclick = () => takeTheWheel();
   }
 };
 
@@ -796,11 +802,12 @@ function startAuto() {
   if (!Policy.trained && !Policy.busy) setTimeout(() => cloneNow(), 400);
 }
 $('bAuto').onclick = startAuto;
-$('bDrive').onclick = () => {
-  started = true; $('start').style.display = 'none';
+function takeTheWheel() {
+  started = true; $('start').style.display = 'none'; $('over').style.display = 'none';
   Demo.stopAuto(); Policy.drive = 'human'; reset(); Demo.go(0);
-  renderer.domElement.requestPointerLock();
-};
+  $('keys').style.display = 'block';
+}
+$('bDrive').onclick = takeTheWheel;
 
 Demo.go(0);
 

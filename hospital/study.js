@@ -56,6 +56,7 @@ const Study = {
       const { g, d } = cells[i];
       LEVEL.walls = g.pinch ? realWalls : this.shell(realWalls);
       LEVEL.crowdCount = d.n;
+      NavGrid.blocked = null;                    // geometry changed, rebuild the route grid
       const naive = this.simulate('naive', this.SECONDS, this.TRIALS, []);
       const pred = this.simulate('predictive', this.SECONDS, this.TRIALS, []);
       out.push({
@@ -72,6 +73,7 @@ const Study = {
       onProgress(i / cells.length);
       if (i < cells.length) return setTimeout(step, 0);
       LEVEL.walls = realWalls; LEVEL.crowdCount = realCount;   // restore the real ward
+      NavGrid.blocked = null;
       Robot.mode = 'naive'; Robot.reset(LEVEL, []);
       this.results = out; this.busy = false;
       onDone(out);
