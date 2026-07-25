@@ -15,6 +15,10 @@
  #bar{height:6px;border-radius:3px;background:#2a3350;margin-top:8px;overflow:hidden}
  #barf{height:100%;width:100%;background:linear-gradient(90deg,#ff5a5a,#5ff3b4);transition:width .2s}
  #btns{bottom:14px;left:50%;transform:translateX(-50%);padding:8px}
+ #model{top:14px;left:14px;width:210px;padding:12px 14px;font-size:12px;
+   font-family:ui-monospace,Menlo,monospace}
+ #model .r{display:flex;justify-content:space-between;padding:2px 0;color:#8792ad}
+ #model .r b{color:#e8edf7;font-weight:500}
  button{margin:0 3px;padding:8px 13px;background:rgba(255,255,255,.05);color:#e8edf7;
    border:1px solid rgba(120,140,190,.25);border-radius:8px;cursor:pointer;font-size:12.5px}
  button:hover{background:rgba(255,255,255,.1)}
@@ -54,8 +58,22 @@
 
 <div id="btns" class="panel">
   <button id="bPredict" class="on">Prediction overlay</button>
+  <button id="bTrain">Train on my runs</button>
   <button id="bRestart">Restart</button>
   <button id="bData">Download data</button>
+</div>
+
+<div id="model" class="panel">
+  <div class="r"><span>predictor</span><b id="mMode">physics</b></div>
+  <div class="r"><span>episodes logged</span><b id="mEps">0</b></div>
+  <div id="mScores" style="display:none">
+    <div class="r" style="margin-top:7px;color:#5f6b85">held-out 20%</div>
+    <div class="r"><span>ADE physics</span><b id="mAdeB">-</b></div>
+    <div class="r"><span>ADE learned</span><b id="mAdeL" style="color:#5ff3b4">-</b></div>
+    <div class="r" style="margin-top:4px"><span>FDE physics</span><b id="mFdeB">-</b></div>
+    <div class="r"><span>FDE learned</span><b id="mFdeL" style="color:#5ff3b4">-</b></div>
+    <div class="r" style="margin-top:4px"><span>FDE gain</span><b id="mGain" style="color:#5ff3b4">-</b></div>
+  </div>
 </div>
 
 <div id="over"></div>

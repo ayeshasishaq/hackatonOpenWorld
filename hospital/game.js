@@ -354,6 +354,7 @@ function loop() {
 
     // ---- log (~10 Hz).  yaw = head orientation, which now differs from travel
     //      direction: exactly the extra signal Human Scene Transformer uses.
+    if (tick % 6 === 0) Predictor.pushHistory(agents, bed);   // 10 Hz, feeds the learned model
     if (tick % 6 === 0) Telemetry.record({
       t: (performance.now() - t0) / 1000,
       player: { x: bed.x, z: bed.z, vx: fx * bed.speed, vz: fz * bed.speed,
@@ -391,6 +392,8 @@ function loop() {
 function finish(won) {
   running = false;
   document.exitPointerLock?.();
+  Trainer.addEpisode(Telemetry.frames);        // keep the run as training data
+  $('mEps').textContent = Trainer.episodes.length;
   const s = Telemetry.summary(), secs = ((performance.now() - t0) / 1000).toFixed(1);
   const o = $('over');
   o.innerHTML = `<h2 style="color:${won ? '#5ff3b4' : '#ff5a5a'}">
@@ -410,6 +413,32 @@ function finish(won) {
 }
 
 // ---------- ui ----------
+// Train on the runs just played: the loop from human behaviour to a working model,
+// closed live in front of the judges.
+$('bTrain').onclick = () => {
+  const b = $('bTrain');
+  if (Trainer.busy) return;
+  Trainer.addEpisode(Telemetry.frames);                    // include the run in progress
+  $('mEps').textContent = Trainer.episodes.length;
+  b.textContent = 'Training 0%';
+  Trainer.train(
+    p => b.textContent = `Training ${(p * 100) | 0}%`,
+    m => {
+      if (m.error) { b.textContent = m.error; setTimeout(() => b.textContent = 'Train on my runs', 2600); return; }
+      b.textContent = 'Retrain'; b.classList.add('on');
+      $('mMode').textContent = 'learned MLP';
+      $('mMode').style.color = '#5ff3b4';
+      $('mScores').style.display = 'block';
+      $('mAdeB').textContent = m.adeB.toFixed(2) + ' m';
+      $('mAdeL').textContent = m.adeL.toFixed(2) + ' m';
+      $('mFdeB').textContent = m.fdeB.toFixed(2) + ' m';
+      $('mFdeL').textContent = m.fdeL.toFixed(2) + ' m';
+      const gain = 100 * (1 - m.fdeL / m.fdeB);            // FDE: the 1.6 s horizon
+      $('mGain').textContent = (gain >= 0 ? '+' : '') + gain.toFixed(0) + '%';
+      $('mGain').style.color = gain > 0 ? '#5ff3b4' : '#ffc24d';
+      $('mEps').textContent = `${m.episodes} (${m.samples} samples)`;
+    });
+};
 $('bRestart').onclick = () => { reset(); renderer.domElement.requestPointerLock(); };
 $('bData').onclick = () => Telemetry.download();
 $('bPredict').onclick = () => {
