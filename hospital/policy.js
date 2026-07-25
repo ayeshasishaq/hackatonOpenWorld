@@ -61,6 +61,41 @@ function policyObs(e, others, goal, walls) {
   return f;
 }
 
+// ---------------------------------------------------------------------------
+// A reliable scripted driver. Two jobs: it drives the gurney during the
+// hands-off demo, and it generates seed demonstrations so the page works cold,
+// before anyone has played. It follows doorway waypoints rather than a potential
+// field, because potential fields oscillate in doorways and never get through.
+//
+// Honesty: data from this is labelled "demonstration", never "human". When a
+// person actually plays, their run replaces it and the label changes.
+// ---------------------------------------------------------------------------
+const ScriptedDriver = {
+  waypoints: [{ x: 1.5, z: 10 }, { x: -1.5, z: 2 }, { x: 1.5, z: -7 }, { x: 0, z: -15.5 }],
+  reset() { this.i = 0; },
+  act(e, agents) {
+    if (this.i === undefined) this.i = 0;
+    let w = this.waypoints[Math.min(this.i, this.waypoints.length - 1)];
+    if (Math.hypot(e.x - w.x, e.z - w.z) < 2.2 && this.i < this.waypoints.length - 1) {
+      this.i++; w = this.waypoints[this.i];
+    }
+    let tx = w.x - e.x, tz = w.z - e.z;
+    const d = Math.hypot(tx, tz) || 1; tx /= d; tz /= d;
+    let near = 9;
+    for (const a of agents) {                       // ease around people, do not fight walls
+      const dx = e.x - a.x, dz = e.z - a.z, dd = Math.hypot(dx, dz);
+      near = Math.min(near, dd);
+      if (dd < 2.6 && dd > .01) { tx += (dx / dd) * (2.6 - dd) * .8; tz += (dz / dd) * (2.6 - dd) * .8; }
+    }
+    const want = Math.atan2(-tx, -tz);
+    const err = ((want - e.heading + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+    return {
+      steer: Math.max(-1, Math.min(1, -err * 1.7)),
+      throttle: Math.max(.05, Math.min(1, 1 - Math.abs(err) * .6 - Math.max(0, 2 - near) * .3)),
+    };
+  },
+};
+
 const Policy = {
   net: null, norm: null, trained: false, busy: false, metrics: null,
   drive: 'human',                 // 'human' | 'auto' | 'world'  (world = every agent)

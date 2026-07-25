@@ -376,12 +376,17 @@ const clock = new THREE.Clock();
 
 function loop() {
   const dt = Math.min(clock.getDelta(), .05);
+  Demo.tick();                                   // drives the hands-off sequence
   if (started && running) {
     // ---- trolley physics: W/S drive, A/D steer the wheels ----
     // Either the human supplies the action, or the cloned policy does. Identical
     // downstream, which is the point: the policy occupies the human's seat.
     let throttle, steer;
-    if (Policy.drive === 'auto' && Policy.trained) {
+    if (Policy.drive === 'scripted') {                 // reliable driver for the hands-off demo
+      const a = ScriptedDriver.act({ x: bed.x, z: bed.z, heading: bed.heading, speed: bed.speed },
+                                   crowd.agents);
+      throttle = a.throttle; steer = a.steer;
+    } else if (Policy.drive === 'auto' && Policy.trained) {
       const others = crowd.agents.map(a => ({ x: a.x, z: a.z, vx: a.vx, vz: a.vz }));
       const a = Policy.act({ x: bed.x, z: bed.z, heading: bed.heading, speed: bed.speed },
                            others, LEVEL.goal, LEVEL.walls);
@@ -641,9 +646,38 @@ addEventListener('keydown', e => {
   else if (k === 'escape') $('study').style.display = 'none';
 });
 
-$('start').onclick = () => {
-  $('start').style.display = 'none'; started = true;
-  Demo.go(0);
+// ---- hands-off cues: the 60 s sequence drives itself ----
+Demo.onCue = cue => {
+  if (cue === 'scripted') { reset(); Policy.drive = 'scripted'; ScriptedDriver.reset(); }
+  else if (cue === 'train') { if (!Trainer.busy) trainNow(); }
+  else if (cue === 'clone') {
+    if (Policy.trained) setDrive('auto');
+    else { cloneNow(); Policy.drive = 'scripted'; }     // keep moving while it fits
+  } else if (cue === 'world') { if (Policy.trained) setDrive('world'); }
+  else if (cue === 'end') {
+    Demo.stopAuto();
+    $('over').innerHTML = `<h2 style="color:#5ff3b4">Human demonstrations in. Robot behaviour out.</h2>
+      <p>Every run logs (observation, action) pairs. A policy clones them. A robot plans with them.</p>
+      <p style="color:#8792ad;font-size:13px">ETH/UCY compatible · Social GAN and Human Scene Transformer</p>
+      <div style="margin-top:14px">
+        <button id="bReplay" class="pri">Replay the 60s</button>
+        <button id="bTake">Drive it yourself</button></div>`;
+    $('over').style.display = 'flex';
+    $('bReplay').onclick = () => { $('over').style.display = 'none'; startAuto(); };
+    $('bTake').onclick = () => { $('over').style.display = 'none'; Demo.stopAuto();
+      Policy.drive = 'human'; reset(); Demo.go(0); renderer.domElement.requestPointerLock(); };
+  }
+};
+
+function startAuto() {
+  started = true; $('start').style.display = 'none';
+  reset(); Demo.startAuto(); Demo.go(0);
+  Policy.drive = 'scripted'; ScriptedDriver.reset();
+}
+$('bAuto').onclick = startAuto;
+$('bDrive').onclick = () => {
+  started = true; $('start').style.display = 'none';
+  Demo.stopAuto(); Policy.drive = 'human'; reset(); Demo.go(0);
   renderer.domElement.requestPointerLock();
 };
 

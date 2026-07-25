@@ -69,6 +69,9 @@
  #study th{color:#8792ad;font-weight:500}
  #study td:first-child,#study th:first-child,#study td:nth-child(2),#study th:nth-child(2){text-align:left}
  #study .good{color:#5ff3b4} #study .bad{color:#ff7a45} #study .flat{color:#8792ad}
+ #autoBar{position:fixed;top:0;left:0;right:0;height:3px;background:rgba(120,140,190,.15);
+   z-index:20;display:none}
+ #autoFill{height:100%;width:0;background:#38e1ff;transition:width .25s linear}
  #xhair{position:fixed;top:50%;left:50%;width:5px;height:5px;margin:-2.5px 0 0 -2.5px;
    border-radius:50%;background:rgba(255,255,255,.45);z-index:9;pointer-events:none;display:none}
 </style>
@@ -164,9 +167,15 @@
   <h1>CODE BLUE</h1>
   <p class="lead">Trauma patient inbound. The OR is waiting.</p>
   <p>Every bump costs them. Do not hit the staff.</p>
-  <p class="keys"><b>W</b> <b>S</b> drive · <b>A</b> <b>D</b> steer · <b>mouse</b> look</p>
-  <div class="go">CLICK TO START</div>
+  <p style="margin-top:10px;color:#5ff3b4;font-size:14px">Human demonstrations in. Robot behaviour out.</p>
+  <div style="margin-top:24px">
+    <button id="bAuto" class="pri" style="padding:14px 28px;font-size:15px">▶ Watch the 60 second demo</button>
+    <button id="bDrive" style="padding:14px 24px;font-size:15px">Drive it yourself</button>
+  </div>
+  <p class="keys" style="margin-top:14px"><b>W</b> <b>S</b> drive · <b>A</b> <b>D</b> steer · <b>mouse</b> look</p>
 </div>
+
+<div id="autoBar"><div id="autoFill"></div></div>
 
 <script src="level.js"></script>
 <script src="crowd.js"></script>
