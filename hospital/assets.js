@@ -22,6 +22,9 @@ const Assets = (() => {
     desk_chair:       { file: 'desk_chair.glb',       size: 1.0 },
     doctor:           { file: 'doctor.glb',           size: 1.75 },
     door:             { file: 'door.glb',             size: 2.1 },
+    // Already authored in metres (~8×10×3.2). size matches height so scale≈1;
+    // Assets.normalise recentres it, so place with rot=π at (0,0,25) — see level.js.
+    entrance:         { file: 'entrance.glb',         size: 3.2 },
     exit_sign:        { file: 'exit_sign.glb',        size: 0.25 },
     extinguisher:     { file: 'extinguisher.glb',     size: 0.65 },
     first_aid:        { file: 'first_aid.glb',        size: 0.35 },

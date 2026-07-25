@@ -8,18 +8,26 @@
 // ============================================================================
 
 const LEVEL = {
-  bounds: { x: 14, z: 20 },              // half-extents of the hospital floor
-  spawn:  { x: 0,  z: 17 },              // gurney starts at the ER entrance
+  // half-extents: ward is |z|<=20; lobby (entrance.glb) sits at z 20..30
+  bounds: { x: 14, z: 30 },
+  spawn:  { x: 0,  z: 25 },              // start in the vestibule, facing the ward
   goal:   { x: 0,  z: -17, r: 2.2 },     // the operating room, far end
+  // Crowd stays in the ward (south of the lobby door), not in the vestibule.
+  wardZ: 19,
 
   // Walls = boxes {x, z, w, d}  (w = size along X, d = size along Z).
   // TODO P2: build a believable ward — corridors, side rooms, a nurse station.
   walls: [
-    // outer shell
-    { x: 0,   z: -20, w: 28,  d: 0.6 },
-    { x: 0,   z:  20, w: 28,  d: 0.6 },
-    { x: -14, z: 0,   w: 0.6, d: 40  },
-    { x: 14,  z: 0,   w: 0.6, d: 40  },
+    // outer shell — north wall split for the 2.4 m back-doorway into the lobby
+    { x: 0,    z: -20, w: 28,   d: 0.6 },
+    { x: -7.6, z:  20, w: 12.8, d: 0.6 },   // left wing  (x -14 .. -1.2)
+    { x:  7.6, z:  20, w: 12.8, d: 0.6 },   // right wing (x  1.2 ..  14)
+    { x: -14,  z: 0,   w: 0.6,  d: 40  },
+    { x:  14,  z: 0,   w: 0.6,  d: 40  },
+    // vestibule shell (entrance.glb is visual; these keep the player inside)
+    { x: -4,   z: 25,  w: 0.6,  d: 10  },   // lobby left
+    { x:  4,   z: 25,  w: 0.6,  d: 10  },   // lobby right
+    { x:  0,   z: 30,  w: 8.6,  d: 0.6 },   // street doors — sealed for the demo
     // corridor pinch points — these create the interesting avoidance moments
     { x: -8,  z: 10,  w: 11,  d: 0.6 },
     { x: 9,   z: 10,  w: 9,   d: 0.6 },
@@ -49,18 +57,17 @@ const LEVEL = {
 // Keep the list to models already in ../assets/models — nothing is fetched live.
 // ---------------------------------------------------------------------------
 const PROPS = [
-  // --- entrance / waiting area (north of the z=10 wall, player spawns at z=17)
-  { key: 'ambulance',       x:  10,    z:  17.4, rot: 0 },
-  { key: 'hospital_sign',   x:   0,    z:  19.6, rot: Math.PI / 2, y: 2.3 },
-  { key: 'waiting_chair_1', x:   5.5,  z:  17,   rot: Math.PI },
-  { key: 'waiting_chair_1', x:   6.6,  z:  17,   rot: Math.PI },
-  { key: 'waiting_chair_1', x:   7.7,  z:  17,   rot: Math.PI },
-  { key: 'waiting_chair_1', x:   4.4,  z:  17,   rot: Math.PI },
-  { key: 'waiting_chair_2', x:  -4,    z:  16,   rot: Math.PI / 2 },
-  { key: 'waiting_chair_2', x:  -4,    z:  13.5, rot: Math.PI / 2 },
+  // --- just inside the ward (past the lobby door at z=20) — waiting row
+  { key: 'waiting_chair_1', x:   5.5,  z:  16,   rot: Math.PI },
+  { key: 'waiting_chair_1', x:   6.6,  z:  16,   rot: Math.PI },
+  { key: 'waiting_chair_1', x:   7.7,  z:  16,   rot: Math.PI },
+  { key: 'waiting_chair_1', x:   4.4,  z:  16,   rot: Math.PI },
+  { key: 'waiting_chair_2', x:  -5,    z:  15,   rot: Math.PI / 2 },
+  { key: 'waiting_chair_2', x:  -5,    z:  13.5, rot: Math.PI / 2 },
   { key: 'vending',         x:  13.1,  z:  12,   rot: -Math.PI / 2 },
   { key: 'biohazard_bin_1', x:  11.8,  z:  12.9, rot: 0 },
   { key: 'exit_sign',       x:   2,    z:  10.4, rot: Math.PI / 2, y: 2.7 },
+  { key: 'ambulance',       x:  11,    z:  14,   rot: -0.3 },
 
   // --- bay A: behind the x=-10 divider, z 10.5 to 19.5
   { key: 'patient_bed_1',   x: -12,    z:  14,   rot: 0 },
@@ -131,6 +138,7 @@ const PROPS = [
 // Returns collidable circles {x, z, r} sized from each model's real footprint.
 function buildProps(THREE, scene) {
   const solids = [];
+  placeEntrance(scene);
   scene.add(buildNurseStation(THREE));
   for (const p of PROPS) {
     const o = Assets.make(p.key);
@@ -144,7 +152,20 @@ function buildProps(THREE, scene) {
     solids.push({ x: p.x, z: p.z, r: f.r });
   }
   solids.push({ x: 6.1, z: 6.4, r: 1.7 });  // the nurse station counter
+  // Reception desk inside the vestibule (visual is in entrance.glb)
+  solids.push({ x: 2.2, z: 26.5, r: 1.1 });
   return solids;
+}
+
+// Glue entrance.glb onto the north end. After Assets.normalise the mesh is
+// centred (local z ≈ −5 front … +5 back). Root at z=25 + yaw π puts the back
+// door on the ward opening at z=20 and the street doors at z=30.
+function placeEntrance(scene) {
+  const o = Assets.make('entrance');
+  if (!o) return;
+  o.position.set(0, 0, 25);
+  o.rotation.y = Math.PI;
+  scene.add(o);
 }
 
 // The one piece of built geometry that stays: a nurse-station counter for the

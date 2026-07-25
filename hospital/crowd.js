@@ -10,7 +10,10 @@
 
 function createCrowd(level, solids) {
   const rand = (a, b) => a + Math.random() * (b - a);
-  const bx = level.bounds.x - 1.5, bz = level.bounds.z - 1.5;
+  const bx = level.bounds.x - 1.5;
+  // Keep staff in the ward — not in the glued vestibule (z > wardZ).
+  const zLo = -(Math.min(level.bounds.z, 20) - 1.5);
+  const zHi = level.wardZ != null ? level.wardZ : (Math.min(level.bounds.z, 20) - 1.5);
 
   // TODO P3: tune the mix. More 'rusher' = more chaos = richer avoidance data.
   const KINDS = [
@@ -28,7 +31,7 @@ function createCrowd(level, solids) {
   };
   const freeSpot = () => {
     for (let i = 0; i < 60; i++) {
-      const x = rand(-bx, bx), z = rand(-bz, bz);
+      const x = rand(-bx, bx), z = rand(zLo, zHi);
       if (!blocked(x, z)) return { x, z };
     }
     return { x: 0, z: 0 };
@@ -70,7 +73,7 @@ function createCrowd(level, solids) {
         a.vx += (tvx - a.vx) * Math.min(1, dt * 3.5);
         a.vz += (tvz - a.vz) * Math.min(1, dt * 3.5);
         a.x = Math.max(-bx, Math.min(bx, a.x + a.vx * dt));
-        a.z = Math.max(-bz, Math.min(bz, a.z + a.vz * dt));
+        a.z = Math.max(zLo, Math.min(zHi, a.z + a.vz * dt));
         // new destination on arrival (or occasionally, so paths stay unpredictable)
         if (Math.hypot(a.gx - a.x, a.gz - a.z) < 1.2 || Math.random() < dt * .08) {
           const g = freeSpot(); a.gx = g.x; a.gz = g.z;

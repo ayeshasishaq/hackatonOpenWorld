@@ -43,6 +43,10 @@ for (let z = -18; z <= 18; z += 6) {
 for (const [x, z] of [[-12, 14], [12, 6], [-12, -2], [-12, -14], [11, -16]]) {
   const l = new THREE.PointLight(0xcfe0ff, 22, 14, 2); l.position.set(x, 3.4, z); scene.add(l);
 }
+// vestibule (entrance.glb) — brighter so the lobby materials read clearly
+for (const z of [23, 27]) {
+  const l = new THREE.PointLight(0xe8f0ff, 50, 16, 2); l.position.set(0, 3.2, z); scene.add(l);
+}
 const orLight = new THREE.PointLight(0x5ff3b4, 90, 26, 2);
 orLight.position.set(LEVEL.goal.x, 4, LEVEL.goal.z); scene.add(orLight);
 
@@ -62,7 +66,7 @@ for (const w of LEVEL.walls) {
 // GLB props from ../assets/models. Wait up to 15s, then dress the ward with
 // whatever arrived; missing keys are skipped by buildProps / Assets.make.
 // Only if nothing loaded do we fall back to the primitive furniture.
-const preloadKeys = [...propKeys(), 'gurney', ...Object.values(kindModels())];
+const preloadKeys = [...propKeys(), 'gurney', 'entrance', ...Object.values(kindModels())];
 const preloadP = Assets.preload(preloadKeys);
 await Promise.race([
   preloadP,
