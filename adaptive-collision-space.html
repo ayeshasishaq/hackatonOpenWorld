@@ -1,0 +1,573 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Adaptive Collision Space</title>
+<style>
+  :root{
+    --ink:#0e111b; --panel:rgba(18,22,34,.82); --stroke:rgba(120,140,190,.18);
+    --txt:#dfe6f5; --dim:#8792ad; --cyan:#38e1ff; --mint:#5ff3b4;
+    --sober:#57d977; --tipsy:#ffc24d; --drunk:#ff5a5a; --warn:#ff7a45;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--ink);color:var(--txt);
+    font-family:var(--sans);overflow:hidden;-webkit-font-smoothing:antialiased}
+  #app{position:fixed;inset:0}
+  canvas{display:block}
+
+  .panel{position:absolute;background:var(--panel);border:1px solid var(--stroke);
+    border-radius:14px;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+    box-shadow:0 8px 30px rgba(0,0,0,.4)}
+
+  #controls{top:14px;left:14px;width:264px;padding:14px 15px}
+  #controls h1{margin:0 0 2px;font-size:14px;letter-spacing:.2px;font-weight:650}
+  #controls .sub{margin:0 0 12px;font-size:11px;color:var(--dim)}
+  .row{display:flex;gap:7px;margin-bottom:9px}
+  button{flex:1;padding:8px 6px;border-radius:9px;border:1px solid var(--stroke);
+    background:rgba(255,255,255,.04);color:var(--txt);font-size:11.5px;font-weight:550;
+    font-family:var(--sans);cursor:pointer;transition:.15s}
+  button:hover{background:rgba(255,255,255,.09);border-color:rgba(120,140,190,.4)}
+  button.primary{background:var(--cyan);color:#04222c;border-color:transparent}
+  button.primary:hover{filter:brightness(1.1)}
+  button.on{background:var(--cyan);color:#04222c;border-color:transparent}
+
+  .slider{margin:11px 0 4px}
+  .slider label{display:flex;justify-content:space-between;font-size:11px;color:var(--dim);margin-bottom:5px}
+  .slider label b{color:var(--txt);font-family:var(--mono);font-weight:500}
+  input[type=range]{width:100%;-webkit-appearance:none;height:4px;border-radius:3px;
+    background:rgba(120,140,190,.25);outline:none}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;
+    border-radius:50%;background:var(--cyan);cursor:pointer;box-shadow:0 0 0 3px rgba(56,225,255,.18)}
+  input[type=range]::-moz-range-thumb{width:14px;height:14px;border:none;border-radius:50%;
+    background:var(--cyan);cursor:pointer}
+
+  .toggles{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:11px}
+  .divider{height:1px;background:var(--stroke);margin:12px -15px}
+
+  #hud{top:14px;right:14px;width:200px;padding:13px 15px;font-family:var(--mono)}
+  #hud .stat{display:flex;justify-content:space-between;font-size:11.5px;padding:3px 0;color:var(--dim)}
+  #hud .stat b{color:var(--txt);font-weight:500}
+  #status{margin:-2px -15px 10px;padding:9px 15px;font-size:11px;font-weight:600;
+    letter-spacing:.3px;border-radius:13px 13px 0 0;text-align:center;
+    background:rgba(56,225,255,.14);color:var(--cyan);font-family:var(--sans)}
+  #status.emergency{background:rgba(255,90,90,.18);color:var(--drunk)}
+  #status.reached{background:rgba(95,243,180,.16);color:var(--mint)}
+
+  #legend{bottom:14px;left:14px;padding:11px 14px;display:flex;gap:16px;font-size:11px;color:var(--dim)}
+  #legend .k{display:flex;align-items:center;gap:6px}
+  #legend .dot{width:9px;height:9px;border-radius:50%}
+  #hint{position:absolute;bottom:16px;left:50%;transform:translateX(-50%);
+    font-size:11px;color:var(--dim);background:var(--panel);border:1px solid var(--stroke);
+    padding:7px 13px;border-radius:20px;pointer-events:none}
+  b.tip{color:var(--txt);font-weight:600}
+  @media (max-width:720px){#controls{width:calc(100vw - 28px)} #hud{display:none} #legend{display:none}}
+</style>
+
+<div id="app"></div>
+
+<div id="controls" class="panel">
+  <h1>Adaptive Collision Space</h1>
+  <p class="sub">Robot X&nbsp;&rarr;&nbsp;Y through a shifting crowd</p>
+  <div class="row">
+    <button id="play" class="primary">Pause</button>
+    <button id="reset">Reset</button>
+  </div>
+  <div class="row">
+    <button id="newgoal">New goal Y</button>
+    <button id="topview">Top view</button>
+  </div>
+
+  <div class="slider"><label>Guests <b id="vCrowd">14</b></label>
+    <input id="crowd" type="range" min="0" max="30" value="14"></div>
+  <div class="slider"><label>Drinking pace <b id="vDrink">1.0&times;</b></label>
+    <input id="drink" type="range" min="0" max="30" value="10"></div>
+  <div class="slider"><label>Robot speed <b id="vSpeed">1.5 m/s</b></label>
+    <input id="speed" type="range" min="5" max="30" value="15"></div>
+  <div class="slider"><label>Robot caution <b id="vCaution">1.0&times;</b></label>
+    <input id="caution" type="range" min="4" max="24" value="12"></div>
+
+  <div class="divider"></div>
+  <div class="toggles">
+    <button id="tFields" class="on">Mood fields</button>
+    <button id="tSense" class="on">Robot sensing</button>
+    <button id="tTrail" class="on">Robot trail</button>
+    <button id="tDrop">Drop someone</button>
+  </div>
+</div>
+
+<div id="hud" class="panel">
+  <div id="status">Navigating</div>
+  <div class="stat"><span>time</span><b id="sTime">0.0s</b></div>
+  <div class="stat"><span>dist to Y</span><b id="sDist">—</b></div>
+  <div class="stat"><span>nearest human</span><b id="sNear">—</b></div>
+  <div class="stat"><span>near-misses</span><b id="sMiss">0</b></div>
+  <div class="stat"><span>collisions</span><b id="sHit">0</b></div>
+  <div class="stat"><span>falls dodged</span><b id="sDodge">0</b></div>
+</div>
+
+<div id="legend" class="panel">
+  <div class="k"><span class="dot" style="background:var(--sober)"></span>sober</div>
+  <div class="k"><span class="dot" style="background:var(--tipsy)"></span>tipsy</div>
+  <div class="k"><span class="dot" style="background:var(--drunk)"></span>drunk</div>
+  <div class="k"><span class="dot" style="background:var(--cyan)"></span>robot</div>
+</div>
+
+<div id="hint">Drag to orbit · scroll to zoom · <b class="tip">click the floor</b> to move goal Y</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ---------- world constants ----------
+const W = 20, D = 14;                 // floor extent (meters) in x,z
+const HX = W/2, HZ = D/2;
+const R_ROBOT = 0.34, R_HUMAN = 0.28;
+
+// ---------- tiny 2D vec helpers (sim runs in x,z plane) ----------
+const v2 = (x,z)=>({x,z});
+const add=(a,b)=>v2(a.x+b.x,a.z+b.z), sub=(a,b)=>v2(a.x-b.x,a.z-b.z);
+const mul=(a,s)=>v2(a.x*s,a.z*s), len=a=>Math.hypot(a.x,a.z);
+const norm=a=>{const l=len(a)||1;return v2(a.x/l,a.z/l);};
+const clampLen=(a,m)=>{const l=len(a);return l>m?mul(a,m/l):a;};
+const rand=(a,b)=>a+Math.random()*(b-a);
+const lerp=(a,b,t)=>a+(b-a)*t;
+function segDist(p,a,b){ // distance point->segment
+  const ab=sub(b,a), t=Math.max(0,Math.min(1,(( p.x-a.x)*ab.x+(p.z-a.z)*ab.z)/(ab.x*ab.x+ab.z*ab.z||1)));
+  const c=add(a,mul(ab,t)); return {d:len(sub(p,c)),c};
+}
+
+// ---------- three.js scene ----------
+const app=document.getElementById('app');
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(innerWidth,innerHeight);
+renderer.shadowMap.enabled=true; renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+app.appendChild(renderer.domElement);
+
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x0e111b);
+scene.fog=new THREE.Fog(0x0e111b,26,52);
+
+const camera=new THREE.PerspectiveCamera(48,innerWidth/innerHeight,0.1,200);
+const camTarget=new THREE.Vector3(0,0,0);
+let camR=24, camAz=Math.PI*0.5, camPolar=0.95; // orbit params
+function updateCam(){
+  const sp=Math.sin(camPolar);
+  camera.position.set(
+    camTarget.x+camR*sp*Math.cos(camAz),
+    camTarget.y+camR*Math.cos(camPolar),
+    camTarget.z+camR*sp*Math.sin(camAz));
+  camera.lookAt(camTarget);
+}
+updateCam();
+
+// lights — warm venue mood
+scene.add(new THREE.HemisphereLight(0x33406a,0x0a0c14,0.55));
+const key=new THREE.DirectionalLight(0xfff0dd,0.9);
+key.position.set(8,16,6); key.castShadow=true;
+key.shadow.mapSize.set(2048,2048);
+key.shadow.camera.left=-16;key.shadow.camera.right=16;
+key.shadow.camera.top=12;key.shadow.camera.bottom=-12;
+key.shadow.camera.near=1;key.shadow.camera.far=50; scene.add(key);
+const glow=new THREE.PointLight(0xff9a4d,0.6,30); glow.position.set(-6,5,-4); scene.add(glow);
+const glow2=new THREE.PointLight(0x4d9aff,0.4,30); glow2.position.set(7,5,5); scene.add(glow2);
+
+// floor
+const floorMat=new THREE.MeshStandardMaterial({color:0x171c2b,roughness:.95,metalness:0});
+const floor=new THREE.Mesh(new THREE.PlaneGeometry(W,D),floorMat);
+floor.rotation.x=-Math.PI/2; floor.receiveShadow=true; scene.add(floor);
+const grid=new THREE.GridHelper(Math.max(W,D),Math.max(W,D),0x2a3350,0x1e2740);
+grid.material.opacity=.5; grid.material.transparent=true; grid.position.y=.01; scene.add(grid);
+// walls (thin)
+const wallMat=new THREE.MeshStandardMaterial({color:0x1b2136,roughness:1});
+function wall(w,h,d,x,y,z){const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),wallMat);
+  m.position.set(x,y,z);m.receiveShadow=true;m.castShadow=true;scene.add(m);}
+wall(W,1.4,.2,0,.7,-HZ); wall(W,1.4,.2,0,.7,HZ);
+wall(.2,1.4,D,-HX,.7,0); wall(.2,1.4,D,HX,.7,0);
+
+// static obstacles (event furniture): {x,z,r}
+const obstacles=[];
+function furniture(){
+  obstacles.length=0;
+  // bar counter along a wall
+  const bar=new THREE.Mesh(new THREE.BoxGeometry(7,1.1,1),
+    new THREE.MeshStandardMaterial({color:0x2a2036,roughness:.7}));
+  bar.position.set(-5,.55,-5.4); bar.castShadow=bar.receiveShadow=true; scene.add(bar);
+  for(let x=-8;x<=-2;x+=1) obstacles.push({x,z:-5.4,r:.6});
+  // round tables
+  const tabs=[[5,-3],[6.5,3.5],[1.5,4.5],[-2,2]];
+  for(const [x,z] of tabs){
+    const t=new THREE.Mesh(new THREE.CylinderGeometry(.75,.55,1,20),
+      new THREE.MeshStandardMaterial({color:0x24304a,roughness:.6}));
+    t.position.set(x,.5,z); t.castShadow=t.receiveShadow=true; scene.add(t);
+    obstacles.push({x,z,r:.9});
+  }
+}
+furniture();
+
+// ---------- markers: start X and goal Y ----------
+function ring(color){
+  const g=new THREE.Group();
+  const r=new THREE.Mesh(new THREE.RingGeometry(.55,.72,40),
+    new THREE.MeshBasicMaterial({color,side:THREE.DoubleSide,transparent:true,opacity:.9}));
+  r.rotation.x=-Math.PI/2; r.position.y=.03; g.add(r);
+  const pin=new THREE.Mesh(new THREE.CylinderGeometry(.05,.05,1.4,8),
+    new THREE.MeshBasicMaterial({color})); pin.position.y=.7; g.add(pin);
+  scene.add(g); return g;
+}
+const startMark=ring(0x4d9aff), goalMark=ring(0x5ff3b4);
+let START=v2(-8,-5), GOAL=v2(8,5);
+startMark.position.set(START.x,0,START.z);
+goalMark.position.set(GOAL.x,0,GOAL.z);
+
+// ---------- robot ----------
+function makeRobot(){
+  const g=new THREE.Group();
+  const body=new THREE.Mesh(new THREE.CylinderGeometry(.32,.36,.7,24),
+    new THREE.MeshStandardMaterial({color:0x0f2733,emissive:0x0a3a47,roughness:.4,metalness:.3}));
+  body.position.y=.42; body.castShadow=true; g.add(body);
+  const head=new THREE.Mesh(new THREE.SphereGeometry(.24,24,18),
+    new THREE.MeshStandardMaterial({color:0x0a1a22,emissive:0x113,roughness:.3}));
+  head.position.y=.9; head.castShadow=true; g.add(head);
+  const eye=new THREE.Mesh(new THREE.SphereGeometry(.08,16,12),
+    new THREE.MeshBasicMaterial({color:0x38e1ff})); eye.position.set(0,.9,.22); g.add(eye);
+  g.userData.eye=eye.material;
+  // direction fin
+  const fin=new THREE.Mesh(new THREE.ConeGeometry(.1,.32,12),
+    new THREE.MeshBasicMaterial({color:0x38e1ff})); fin.rotation.x=Math.PI/2;
+  fin.position.set(0,.42,.42); g.add(fin);
+  scene.add(g); return g;
+}
+const robotMesh=makeRobot();
+// robot sensing ring
+const senseMesh=new THREE.Mesh(new THREE.RingGeometry(2.3,2.42,48),
+  new THREE.MeshBasicMaterial({color:0x38e1ff,transparent:true,opacity:.22,side:THREE.DoubleSide}));
+senseMesh.rotation.x=-Math.PI/2; senseMesh.position.y=.02; scene.add(senseMesh);
+// robot trail
+const trailGeo=new THREE.BufferGeometry();
+const TRAIL_MAX=400; const trailPos=new Float32Array(TRAIL_MAX*3);
+trailGeo.setAttribute('position',new THREE.BufferAttribute(trailPos,3));
+const trail=new THREE.Line(trailGeo,new THREE.LineBasicMaterial({color:0x38e1ff,transparent:true,opacity:.5}));
+scene.add(trail); let trailN=0;
+
+const robot={pos:{...START},vel:v2(0,0),reached:false};
+
+// ---------- humans ----------
+const humans=[]; const humanMeshes=[];
+function moodColor(m){ // 0 sober -> 1 drunk
+  const c=new THREE.Color();
+  if(m<.5) c.setHSL(lerp(.33,.13,m/.5),.7,.55);      // green->amber
+  else     c.setHSL(lerp(.13,0,(m-.5)/.5),.75,.57);  // amber->red
+  return c;
+}
+function makeHumanMesh(){
+  const g=new THREE.Group();
+  const body=new THREE.Mesh(new THREE.CylinderGeometry(.22,.26,1.2,16),
+    new THREE.MeshStandardMaterial({roughness:.7})); body.position.y=.6; body.castShadow=true;
+  const head=new THREE.Mesh(new THREE.SphereGeometry(.2,18,14),
+    new THREE.MeshStandardMaterial({roughness:.6})); head.position.y=1.35; head.castShadow=true;
+  g.add(body,head); g.userData={body:body.material,head:head.material};
+  // adaptive mood field (floor disc)
+  const field=new THREE.Mesh(new THREE.CircleGeometry(1,40),
+    new THREE.MeshBasicMaterial({transparent:true,opacity:.14,side:THREE.DoubleSide}));
+  field.rotation.x=-Math.PI/2; field.position.y=.015; g.add(field); g.userData.field=field;
+  scene.add(g); return g;
+}
+function spawnHuman(){
+  let x,z,ok,tries=0;
+  do{ x=rand(-HX+1,HX-1); z=rand(-HZ+1,HZ-1); ok=true; tries++;
+      for(const o of obstacles) if(Math.hypot(x-o.x,z-o.z)<o.r+.6) ok=false;
+      if(Math.hypot(x-robot.pos.x,z-robot.pos.z)<2) ok=false;
+  }while(!ok&&tries<40);
+  const h={pos:v2(x,z),vel:v2(0,0),way:v2(rand(-HX+1,HX-1),rand(-HZ+1,HZ-1)),
+    mood:rand(0,.15),drinkBias:rand(.6,1.4),wobPhase:rand(0,6.28),
+    falling:false,phase:'up',fallT:0,fallDir:v2(1,0),fallLen:0,lieDur:0};
+  humans.push(h); humanMeshes.push(makeHumanMesh());
+}
+function setCrowd(n){
+  while(humans.length<n) spawnHuman();
+  while(humans.length>n){ scene.remove(humanMeshes.pop()); humans.pop(); }
+}
+
+// current collision footprint of a human: circle (upright) or segment (falling)
+function footprint(h){
+  const feet=h.pos;
+  if(h.falling && h.fallLen>0.05){
+    const tip=add(feet,mul(h.fallDir,h.fallLen));
+    // unpredictability margin grows with mood & during fall
+    return {seg:true,a:feet,b:tip,r:R_HUMAN+.15, margin: .35 + h.mood*.5 + (h.falling?.5:0)};
+  }
+  return {seg:false,a:feet,b:feet,r:R_HUMAN, margin:.25 + h.mood*.7};
+}
+
+// ---------- simulation state ----------
+let params={crowd:14,drink:1,speed:1.5,caution:1.0};
+let show={fields:true,sense:true,trail:true};
+let playing=true;
+let stats={time:0,miss:0,hit:0,dodge:0};
+let hitCooldown=0, dodgeCooldown=0;
+
+function resetSim(){
+  robot.pos={...START}; robot.vel=v2(0,0); robot.reached=false;
+  stats={time:0,miss:0,hit:0,dodge:0}; hitCooldown=0; dodgeCooldown=0; trailN=0;
+  for(const h of humans){ h.mood=rand(0,.15); h.falling=false; h.phase='up'; h.fallLen=0;
+    h.pos=v2(rand(-HX+1,HX-1),rand(-HZ+1,HZ-1)); h.way=v2(rand(-HX+1,HX-1),rand(-HZ+1,HZ-1)); }
+  setStatus('Navigating','');
+}
+
+// ---------- human behaviour ----------
+function startFall(h){
+  h.falling=true; h.phase='toppling'; h.fallT=0;
+  // often topple toward the nearest person or the robot — that's the danger
+  let tgt=robot.pos, best=1e9;
+  for(const o of humans){ if(o===h) continue; const d=Math.hypot(o.pos.x-h.pos.x,o.pos.z-h.pos.z);
+    if(d<best){best=d;tgt=o.pos;} }
+  const dr=Math.hypot(robot.pos.x-h.pos.x,robot.pos.z-h.pos.z);
+  if(dr<best) tgt=robot.pos;
+  let dir=norm(sub(tgt,h.pos)); if(len(dir)<.01) dir=v2(rand(-1,1),rand(-1,1));
+  // add randomness so it's not a guided missile
+  h.fallDir=norm(add(dir,v2(rand(-.5,.5),rand(-.5,.5))));
+  h.fallLen=0; h.lieDur=rand(2.4,4.2);
+}
+
+function updateHuman(h,dt){
+  const m=humanMeshes[humans.indexOf(h)];
+  if(h.falling){
+    if(h.phase==='toppling'){
+      h.fallT+=dt/0.6;
+      h.fallLen=Math.min(1.5,1.5*h.fallT);
+      if(h.fallT>=1){h.phase='down';h.fallT=0;}
+    }else if(h.phase==='down'){
+      h.fallT+=dt; h.fallLen=1.5;
+      if(h.fallT>=h.lieDur){h.phase='recover';h.fallT=0;}
+    }else if(h.phase==='recover'){
+      h.fallT+=dt/1.1; h.fallLen=Math.max(0,1.5*(1-h.fallT));
+      if(h.fallT>=1){h.falling=false;h.phase='up';h.mood=Math.max(0,h.mood-.25);}
+    }
+    // tilt mesh toward fall dir
+    const ang=Math.atan2(h.fallDir.z,h.fallDir.x);
+    const tilt=(h.phase==='recover')?(1-h.fallT):(h.phase==='down'?1:h.fallT);
+    m.rotation.set(0,-ang+Math.PI/2,0);
+    m.children[0].rotation.z=tilt*1.45; // body topple
+    m.position.set(h.pos.x + h.fallDir.x*h.fallLen*.5,0,h.pos.z + h.fallDir.z*h.fallLen*.5);
+  }else{
+    m.children[0].rotation.z=0; m.rotation.y=0;
+    // sober up? no — drink over time
+    h.mood=Math.min(1,h.mood + dt*0.012*params.drink*h.drinkBias);
+    // seek waypoint
+    let steer=norm(sub(h.way,h.pos));
+    // separation from others
+    for(const o of humans){ if(o===h) continue;
+      const d=sub(h.pos,o.pos), l=len(d); if(l<1.1&&l>.01) steer=add(steer,mul(norm(d),(1.1-l)*.8)); }
+    // avoid obstacles
+    for(const ob of obstacles){ const d=sub(h.pos,v2(ob.x,ob.z)),l=len(d);
+      if(l<ob.r+.6&&l>.01) steer=add(steer,mul(norm(d),(ob.r+.6-l)*1.2)); }
+    // drunk wobble: erratic lateral drift + variable speed
+    if(h.mood>.3){
+      h.wobPhase+=dt*(2+h.mood*4);
+      const perp=v2(-steer.z,steer.x);
+      steer=add(steer,mul(perp,Math.sin(h.wobPhase)*h.mood*1.3));
+      steer=add(steer,mul(v2(rand(-1,1),rand(-1,1)),h.mood*.5));
+    }
+    const spd=lerp(0.9,0.45,h.mood); // drunk = slower, unsteady
+    const desired=mul(norm(steer),spd);
+    h.vel=clampLen(add(h.vel,mul(sub(desired,h.vel),dt*4)),spd);
+    h.pos=add(h.pos,mul(h.vel,dt));
+    // bounds + new waypoint
+    h.pos.x=Math.max(-HX+.5,Math.min(HX-.5,h.pos.x));
+    h.pos.z=Math.max(-HZ+.5,Math.min(HZ-.5,h.pos.z));
+    if(len(sub(h.way,h.pos))<.8||Math.random()<dt*.15)
+      h.way=v2(rand(-HX+1,HX-1),rand(-HZ+1,HZ-1));
+    m.position.set(h.pos.x,0,h.pos.z);
+    if(len(h.vel)>.05) m.rotation.y=Math.atan2(h.vel.x,h.vel.z);
+    // chance to fall when drunk
+    if(h.mood>.62 && Math.random()<dt*0.06*(h.mood-.5)) startFall(h);
+  }
+  // colour + adaptive field
+  const col=moodColor(h.mood);
+  m.userData.body.color.copy(col); m.userData.head.color.copy(col);
+  if(h.falling){ m.userData.body.color.setHex(0xff5a5a); m.userData.head.color.setHex(0xff7a45); }
+  const fp=footprint(h); const rad=fp.r+fp.margin;
+  const fld=m.userData.field;
+  fld.visible=show.fields;
+  if(h.falling){ // stretch the field into the lunge direction
+    const ang=Math.atan2(h.fallDir.z,h.fallDir.x);
+    fld.scale.set(rad+h.fallLen*.9,rad,1);
+    fld.rotation.set(-Math.PI/2,0,-ang);
+    fld.position.set(h.fallDir.x*h.fallLen*.5,.02,h.fallDir.z*h.fallLen*.5);
+    fld.material.color.setHex(0xff5a5a); fld.material.opacity=.28;
+  }else{
+    fld.scale.set(rad,rad,1); fld.rotation.set(-Math.PI/2,0,0); fld.position.set(0,.015,0);
+    fld.material.color.copy(col); fld.material.opacity=.10+h.mood*.14;
+  }
+}
+
+// ---------- robot navigation: adaptive potential field + emergency dodge ----------
+function updateRobot(dt){
+  if(robot.reached){ robot.vel=clampLen(robot.vel,0); return; }
+  const p=robot.pos;
+  // attraction to goal
+  let force=mul(norm(sub(GOAL,p)),1.6);
+  let emergency=false, nearestFall=null, nfd=1e9;
+
+  for(const h of humans){
+    // predict a little ahead for moving people (velocity-obstacle flavour)
+    const pred=h.falling?h.pos:add(h.pos,mul(h.vel,0.5));
+    const fp=footprint(h);
+    // distance to the (possibly extended) footprint
+    const a=fp.a, b=fp.b;
+    const {d}=segDist(p,a,b);
+    const safe=(fp.r+fp.margin)*params.caution + R_ROBOT;
+    if(d<safe){
+      const away=norm(sub(p,segDist(p,a,b).c));
+      const strength=(safe-d)/safe;
+      force=add(force,mul(away, strength*strength*3.4));
+    }
+    if(h.falling){
+      const fd=segDist(p,a,b).d;
+      if(fd<nfd){nfd=fd;nearestFall=h;}
+      if(fd<2.4) emergency=true;
+    }
+  }
+  // static obstacles + walls
+  for(const ob of obstacles){ const d=sub(p,v2(ob.x,ob.z)),l=len(d),safe=ob.r+R_ROBOT+.4;
+    if(l<safe&&l>.01) force=add(force,mul(norm(d),((safe-l)/safe)*2.2)); }
+  const wallPush=(edge,axis,sign)=>{const dist=edge-sign*p[axis]; if(dist<1.2){
+    const f=v2(0,0); f[axis]=-sign*((1.2-dist)/1.2)*2.6; force=add(force,f);}};
+  wallPush(HX,'x',1); wallPush(HX,'x',-1); wallPush(HZ,'z',1); wallPush(HZ,'z',-1);
+
+  // emergency: hard lateral dodge away from the nearest faller + brake
+  let maxV=params.speed;
+  if(emergency&&nearestFall){
+    const toH=norm(sub(nearestFall.pos,p));
+    // pick perpendicular side that moves away from the fall lunge
+    let perp=v2(-toH.z,toH.x);
+    if((perp.x*nearestFall.fallDir.x+perp.z*nearestFall.fallDir.z)>0) perp=mul(perp,-1);
+    force=add(force,mul(perp,4.5));
+    force=add(force,mul(norm(sub(p,nearestFall.pos)),3.0));
+    maxV=params.speed*1.25; // allowed to scoot faster to escape
+    if(dodgeCooldown<=0){stats.dodge++;dodgeCooldown=1.5;}
+  }
+
+  // integrate
+  const desired=clampLen(force,maxV);
+  robot.vel=clampLen(add(robot.vel,mul(sub(desired,robot.vel),dt*6)),maxV);
+  robot.pos=add(robot.pos,mul(robot.vel,dt));
+  robot.pos.x=Math.max(-HX+.4,Math.min(HX-.4,robot.pos.x));
+  robot.pos.z=Math.max(-HZ+.4,Math.min(HZ-.4,robot.pos.z));
+
+  // collisions + near-miss tracking
+  let nearest=1e9;
+  for(const h of humans){ const fp=footprint(h); const {d}=segDist(robot.pos,fp.a,fp.b);
+    const gap=d-(fp.r+R_ROBOT); nearest=Math.min(nearest,gap);
+    if(gap<0 && hitCooldown<=0){ stats.hit++; hitCooldown=1;
+      robot.vel=mul(norm(sub(robot.pos,fp.a)),params.speed); }
+    else if(gap<0.35 && gap>0.02){ /* near miss handled below */ }
+  }
+  if(nearest<0.4 && nearest>0.02 && hitCooldown<=0.001){
+    // count a near-miss once per approach using a light gate
+    if(!robot._nm){stats.miss++;robot._nm=true;}
+  } else if(nearest>0.7){ robot._nm=false; }
+
+  hitCooldown=Math.max(0,hitCooldown-dt);
+  dodgeCooldown=Math.max(0,dodgeCooldown-dt);
+
+  // reached?
+  if(len(sub(GOAL,robot.pos))<0.7){ robot.reached=true; setStatus('Reached Y','reached'); }
+  else if(emergency) setStatus('Emergency dodge','emergency');
+  else setStatus('Navigating','');
+
+  robot._nearest=nearest; robot._emergency=emergency;
+}
+
+// ---------- status / hud ----------
+const elStatus=document.getElementById('status');
+function setStatus(t,cls){ elStatus.textContent=t; elStatus.className=cls; }
+function updateHud(){
+  document.getElementById('sTime').textContent=stats.time.toFixed(1)+'s';
+  document.getElementById('sDist').textContent=robot.reached?'0.0 m':len(sub(GOAL,robot.pos)).toFixed(1)+' m';
+  const nm=(robot._nearest??Infinity);
+  document.getElementById('sNear').textContent=isFinite(nm)?Math.max(0,nm).toFixed(2)+' m':'—';
+  document.getElementById('sMiss').textContent=stats.miss;
+  document.getElementById('sHit').textContent=stats.hit;
+  document.getElementById('sDodge').textContent=stats.dodge;
+}
+
+// ---------- render sync ----------
+function syncMeshes(){
+  robotMesh.position.set(robot.pos.x,0,robot.pos.z);
+  if(len(robot.vel)>.03) robotMesh.rotation.y=Math.atan2(robot.vel.x,robot.vel.z);
+  robotMesh.userData.eye.color.setHex(robot._emergency?0xff5a5a:0x38e1ff);
+  senseMesh.position.set(robot.pos.x,.02,robot.pos.z);
+  senseMesh.visible=show.sense;
+  senseMesh.material.color.setHex(robot._emergency?0xff5a5a:0x38e1ff);
+  // trail
+  trail.visible=show.trail;
+  if(show.trail && playing){
+    if(trailN<TRAIL_MAX){ trailPos[trailN*3]=robot.pos.x;trailPos[trailN*3+1]=.05;trailPos[trailN*3+2]=robot.pos.z;trailN++; }
+    else{ for(let i=0;i<TRAIL_MAX-1;i++){trailPos[i*3]=trailPos[(i+1)*3];trailPos[i*3+1]=trailPos[(i+1)*3+1];trailPos[i*3+2]=trailPos[(i+1)*3+2];}
+      trailPos[(TRAIL_MAX-1)*3]=robot.pos.x;trailPos[(TRAIL_MAX-1)*3+1]=.05;trailPos[(TRAIL_MAX-1)*3+2]=robot.pos.z; }
+    trailGeo.setDrawRange(0,trailN); trailGeo.attributes.position.needsUpdate=true;
+  }
+  goalMark.position.set(GOAL.x,0,GOAL.z);
+  goalMark.children[0].rotation.z+=0.02;
+}
+
+// ---------- main loop ----------
+let last=performance.now();
+function frame(now){
+  let dt=Math.min(0.05,(now-last)/1000); last=now;
+  if(playing){
+    stats.time+=dt;
+    for(const h of humans) updateHuman(h,dt);
+    updateRobot(dt);
+  }
+  syncMeshes(); updateHud();
+  renderer.render(scene,camera);
+  requestAnimationFrame(frame);
+}
+setCrowd(params.crowd);
+requestAnimationFrame(frame);
+
+// ---------- controls wiring ----------
+const $=id=>document.getElementById(id);
+$('play').onclick=()=>{playing=!playing; $('play').textContent=playing?'Pause':'Play';};
+$('reset').onclick=resetSim;
+$('newgoal').onclick=()=>{ let x,z,ok,t=0; do{x=rand(-HX+1,HX-1);z=rand(-HZ+1,HZ-1);ok=true;t++;
+  for(const o of obstacles) if(Math.hypot(x-o.x,z-o.z)<o.r+.5) ok=false;}while(!ok&&t<40);
+  GOAL=v2(x,z); robot.reached=false; setStatus('Navigating',''); };
+$('topview').onclick=()=>{ camAz=Math.PI*0.5; camPolar=0.12; camR=22; updateCam(); };
+$('tDrop').onclick=()=>{ // force the nearest sober-enough person to topple toward the robot
+  let best=null,bd=1e9; for(const h of humans){ if(h.falling)continue;
+    const d=Math.hypot(h.pos.x-robot.pos.x,h.pos.z-robot.pos.z); if(d<bd){bd=d;best=h;} }
+  if(best){ best.mood=Math.max(best.mood,.7); startFall(best); best.fallDir=norm(sub(robot.pos,best.pos)); } };
+
+$('crowd').oninput=e=>{params.crowd=+e.target.value;$('vCrowd').textContent=params.crowd;setCrowd(params.crowd);};
+$('drink').oninput=e=>{params.drink=e.target.value/10;$('vDrink').textContent=params.drink.toFixed(1)+'\u00d7';};
+$('speed').oninput=e=>{params.speed=e.target.value/10;$('vSpeed').textContent=params.speed.toFixed(1)+' m/s';};
+$('caution').oninput=e=>{params.caution=e.target.value/12;$('vCaution').textContent=params.caution.toFixed(1)+'\u00d7';};
+
+function toggle(btn,key){ $(btn).onclick=()=>{show[key]=!show[key];$(btn).classList.toggle('on',show[key]);}; }
+toggle('tFields','fields'); toggle('tSense','sense'); toggle('tTrail','trail');
+
+// ---------- camera + goal-pick interaction ----------
+const ray=new THREE.Raycaster(); const ndc=new THREE.Vector2();
+let dragging=false, dragged=false, px=0, py=0;
+renderer.domElement.addEventListener('pointerdown',e=>{dragging=true;dragged=false;px=e.clientX;py=e.clientY;});
+addEventListener('pointermove',e=>{ if(!dragging)return;
+  const dx=e.clientX-px, dy=e.clientY-py; px=e.clientX; py=e.clientY;
+  if(Math.abs(dx)+Math.abs(dy)>2) dragged=true;
+  camAz-=dx*0.006; camPolar=Math.max(0.08,Math.min(1.45,camPolar-dy*0.005)); updateCam(); });
+addEventListener('pointerup',e=>{
+  if(dragging&&!dragged){ // click -> set goal on floor
+    ndc.x=(e.clientX/innerWidth)*2-1; ndc.y=-(e.clientY/innerHeight)*2+1;
+    ray.setFromCamera(ndc,camera); const hit=ray.intersectObject(floor);
+    if(hit.length){ const p=hit[0].point;
+      GOAL=v2(Math.max(-HX+1,Math.min(HX-1,p.x)),Math.max(-HZ+1,Math.min(HZ-1,p.z)));
+      robot.reached=false; setStatus('Navigating',''); } }
+  dragging=false; });
+renderer.domElement.addEventListener('wheel',e=>{e.preventDefault();
+  camR=Math.max(9,Math.min(40,camR+e.deltaY*0.02)); updateCam();},{passive:false});
+
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);});
+</script>
