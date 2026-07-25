@@ -492,6 +492,41 @@ $('bRobot').onclick = () => {
   $('rMode').textContent = Robot.mode;
   $('rMode').style.color = pred ? '#5ff3b4' : '#ffc24d';
 };
+// The stratified study: not "does prediction help" but WHERE it helps.
+$('bStudy').onclick = () => {
+  if (Study.busy) return;
+  const b = $('bStudy');
+  b.textContent = 'Running 0%';
+  Study.run(
+    p => b.textContent = `Running ${(p * 100) | 0}%`,
+    rows => {
+      b.textContent = 'Run study';
+      const cell = v => {
+        if (v === null) return '<td class="flat">n/a</td>';         // zero baseline
+        const cls = Math.abs(v) < 8 ? 'flat' : (v > 0 ? 'good' : 'bad');
+        return `<td class="${cls}">${v >= 0 ? '+' : ''}${v.toFixed(0)}%</td>`;
+      };
+      let h = `<table><tr><th>geometry</th><th>density</th>
+        <th>hits/min</th><th>frozen</th><th>m/min</th>
+        <th>hits</th><th>frozen</th><th>throughput</th></tr>`;
+      let lastGeom = null;
+      for (const r of rows) {
+        const sep = r.geom !== lastGeom && lastGeom !== null ? ' class="sep"' : '';
+        lastGeom = r.geom;
+        h += `<tr${sep}><td>${r.geom}</td><td>${r.density} (${r.n})</td>
+          <td>${r.naive.hits.toFixed(1)} &rarr; ${r.pred.hits.toFixed(1)}</td>
+          <td>${r.naive.stall.toFixed(0)}% &rarr; ${r.pred.stall.toFixed(0)}%</td>
+          <td>${r.naive.dist.toFixed(0)} &rarr; ${r.pred.dist.toFixed(0)}</td>
+          ${cell(r.hitGain)}${cell(r.stallGain)}${cell(r.distGain)}</tr>`;
+      }
+      h += '</table><p class="sub" style="margin-top:12px">Left three columns are naive &rarr; predictive. '
+         + 'Right three are the gain from prediction. Green is a real improvement, grey is noise.</p>';
+      $('studyTable').innerHTML = h;
+      $('study').style.display = 'block';
+    });
+};
+$('sClose').onclick = () => $('study').style.display = 'none';
+$('sCopy').onclick = () => navigator.clipboard?.writeText(Study.asText());
 $('bRestart').onclick = () => { reset(); renderer.domElement.requestPointerLock(); };
 $('bData').onclick = () => Telemetry.download();
 $('bPredict').onclick = () => {

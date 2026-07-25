@@ -38,6 +38,17 @@
  #over p{color:#8792ad;font-size:14px;margin:3px}
  #xhair{position:fixed;top:50%;left:50%;width:5px;height:5px;margin:-2.5px 0 0 -2.5px;
    border-radius:50%;background:rgba(255,255,255,.5);z-index:9;pointer-events:none}
+ #study{position:fixed;inset:auto;top:50%;left:50%;transform:translate(-50%,-50%);
+   display:none;z-index:40;background:rgba(12,16,24,.97);border:1px solid rgba(120,140,190,.25);
+   border-radius:14px;padding:20px 24px;max-width:min(760px,94vw);max-height:88vh;overflow:auto}
+ #study h3{margin:0 0 4px;font-size:17px}
+ #study .sub{margin:0 0 14px;font-size:12px;color:#8792ad;max-width:600px;line-height:1.5}
+ #study table{border-collapse:collapse;font-size:12px;font-family:ui-monospace,Menlo,monospace;width:100%}
+ #study th,#study td{padding:5px 9px;text-align:right;border-bottom:1px solid rgba(120,140,190,.12)}
+ #study th{color:#8792ad;font-weight:500;text-align:right}
+ #study td:first-child,#study th:first-child,#study td:nth-child(2),#study th:nth-child(2){text-align:left}
+ #study .good{color:#5ff3b4} #study .bad{color:#ff7a45} #study .flat{color:#8792ad}
+ #study tr.sep td{border-top:1px solid rgba(120,140,190,.28)}
 </style>
 <script type="importmap">{"imports":{
   "three":"https://unpkg.com/three@0.160.0/build/three.module.js",
@@ -60,6 +71,7 @@
   <button id="bPredict" class="on">Prediction overlay</button>
   <button id="bTrain">Train on my runs</button>
   <button id="bRobot">Robot: naive</button>
+  <button id="bStudy">Run study</button>
   <button id="bRestart">Restart</button>
   <button id="bData">Download data</button>
 </div>
@@ -84,6 +96,17 @@
 
 <div id="over"></div>
 
+<div id="study">
+  <h3>Where does prediction actually help?</h3>
+  <p class="sub">Same controller and map in every cell. Only the planning input changes.
+     Stratified by density and geometry, after Liu et al., "Beyond ADE and FDE".</p>
+  <div id="studyTable"></div>
+  <div style="margin-top:12px">
+    <button id="sCopy">Copy as table</button>
+    <button id="sClose">Close</button>
+  </div>
+</div>
+
 <div id="start">
   <h1>CODE BLUE</h1>
   <p class="lead">Trauma patient inbound. The OR is waiting.</p>
@@ -97,5 +120,6 @@
 <script src="telemetry.js"></script>
 <script src="predict.js"></script>
 <script src="robot.js"></script>
+<script src="study.js"></script>
 <script type="module" src="game.js"></script>
 </body></html>

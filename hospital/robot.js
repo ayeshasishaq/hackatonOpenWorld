@@ -75,16 +75,20 @@ const Robot = {
       // Reacting to a predicted conflict lets it start turning seconds early.
       for (let i = 0; i < agents.length; i++) {
         const path = preds[i].path || preds[i];
+        // React ONCE, to the closest predicted approach. Pushing at every future
+        // step would make this planner ~8x more repulsive than the naive one and
+        // the comparison would measure timidity, not prediction. This is also the
+        // principled form: it is the closest point of approach that matters.
+        let bd = 1e9, bdx = 0, bdz = 0, bt = 0;
         for (let s = 0; s < path.length; s++) {
           const tAhead = (s + 1) * DT;
           const rx = this.x + this.vx * tAhead, rz = this.z + this.vz * tAhead;
           const dx = rx - path[s].x, dz = rz - path[s].z, d = Math.hypot(dx, dz);
-          const safe = this.SAFE + .45;
-          if (d < safe && d > .01) {
-            const decay = 1 / (1 + tAhead * 1.6);            // soon matters more
-            repel(dx, dz, d, ((safe - d) / safe) * 3.4 * decay);
-          }
+          if (d < bd) { bd = d; bdx = dx; bdz = dz; bt = tAhead; }
         }
+        const safe = this.SAFE + .45;
+        if (bd < safe && bd > .01)
+          repel(bdx, bdz, bd, ((safe - bd) / safe) * 3.4 / (1 + bt * 1.6));
       }
     } else {
       // Naive: only what is happening right now.
