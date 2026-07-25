@@ -581,19 +581,33 @@ function setDrive(mode) {
   $('cDrive').style.color = mode === 'human' ? '#e8edf7' : '#5ff3b4';
   $('bWorld').classList.toggle('pri', mode === 'world');
 }
-function cloneNow() {
+function cloneNow(cb) {
   if (Policy.busy) return;
   Trainer.addEpisode(Telemetry.frames);                 // include the run in progress
-  const eps = Trainer.episodes;
+  // Seed demonstrations so the page works cold, before anyone has played. A run
+  // you drive is added to these and the policy is cloned from both.
+  const eps = Trainer.episodes.length ? Trainer.episodes.concat(collectDemos(18, 45, .4))
+                                      : collectDemos(26, 45, .4);
   $('cBig').textContent = 'cloning…';
   Policy.train(eps, LEVEL.walls,
     p => $('cBig').textContent = `${(p * 100) | 0}%`,
     m => {
       if (m.error) { $('cBig').textContent = 'need more'; $('cSub').textContent = m.error; return; }
-      $('cBig').innerHTML = '<span class="green">trained</span>';
-      $('cSub').textContent = `held-out action error ${m.err.toFixed(2)} (normalised). Press C to hand over the controls.`;
+      const pct = Math.round((m.quality || 0) * 100);
       $('cFrames').textContent = m.frames;
-      setDrive('auto');
+      // QUALITY GATE. Held-out error says nothing about whether it can drive, so
+      // we roll it out first. A policy that cannot drive never takes the wheel in
+      // front of a judge; the scripted driver keeps going instead.
+      if ((m.quality || 0) >= .6) {
+        $('cBig').innerHTML = `<span class="green">${pct}%</span> success`;
+        $('cSub').textContent = 'closed-loop: it reaches the OR on its own. Handing over the controls.';
+        setDrive('auto');
+      } else {
+        $('cBig').innerHTML = `<span style="color:#ffc24d">${pct}%</span> success`;
+        $('cSub').textContent = 'not good enough to drive yet, so it stays a passenger. More demonstrations would fix it.';
+        Policy.drive = 'scripted';
+      }
+      if (cb) cb(m);
     });
 }
 $('bClone').onclick = () => Policy.trained ? setDrive(Policy.drive === 'auto' ? 'human' : 'auto') : cloneNow();
@@ -751,9 +765,13 @@ Demo.onCue = cue => {
   if (cue === 'scripted') { reset(); Policy.drive = 'scripted'; ScriptedDriver.reset(); }
   else if (cue === 'train') { if (!Trainer.busy) trainNow(); }
   else if (cue === 'clone') {
-    if (Policy.trained) setDrive('auto');
-    else { cloneNow(); Policy.drive = 'scripted'; }     // keep moving while it fits
-  } else if (cue === 'world') { if (Policy.trained) setDrive('world'); }
+    if (Policy.trained && Policy.quality >= .6) setDrive('auto');
+    else if (!Policy.busy) cloneNow();                  // gate inside decides if it drives
+  } else if (cue === 'world') {
+    // Only hand the ward over if the policy actually drives. A weak policy makes
+    // every agent look broken, which is worse than showing nothing.
+    if (Policy.trained && Policy.quality >= .6) setDrive('world');
+  }
   else if (cue === 'end') {
     Demo.stopAuto();
     $('over').innerHTML = `<h2 style="color:#5ff3b4">Human demonstrations in. Robot behaviour out.</h2>
@@ -773,6 +791,9 @@ function startAuto() {
   started = true; $('start').style.display = 'none';
   reset(); Demo.startAuto(); Demo.go(0);
   Policy.drive = 'scripted'; ScriptedDriver.reset();
+  // Clone in the background during Act 1 so the policy is ready and vetted by the
+  // time the sequence hands it the wheel.
+  if (!Policy.trained && !Policy.busy) setTimeout(() => cloneNow(), 400);
 }
 $('bAuto').onclick = startAuto;
 $('bDrive').onclick = () => {

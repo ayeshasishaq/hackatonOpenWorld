@@ -52,8 +52,9 @@ function createCrowd(level, solids) {
           if (a.heading === undefined) { a.heading = Math.atan2(a.vx, a.vz); a.spd = 0; }
           const others = agents.filter(o => o !== a)
             .map(o => ({ x: o.x, z: o.z, vx: o.vx, vz: o.vz }));
+          // routed=false: staff wander to their own goals, not the gurney's route
           const act = Policy.act({ x: a.x, z: a.z, heading: a.heading, speed: a.spd },
-                                 others, { x: a.gx, z: a.gz }, level.walls);
+                                 others, { x: a.gx, z: a.gz }, level.walls, false);
           a.spd = Math.max(-.6, Math.min(a.speed, a.spd + act.throttle * 3.2 * dt));
           a.spd -= a.spd * 1.6 * dt;
           a.heading -= act.steer * 2.4 * (a.spd / a.speed) * dt;

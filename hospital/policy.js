@@ -25,7 +25,9 @@ const P_OUT = 2;                          // throttle, steer
 
 // Observation for ANY entity: {x, z, heading, speed}. `others` is a list of
 // {x, z, vx, vz}. Rotating into the ego frame is what makes it transferable.
-function policyObs(e, others, goal, walls) {
+// `routed` = this entity is following the building route, so its subgoal comes
+// from the global planner. Crowd agents wander to their own goals and pass false.
+function policyObs(e, others, goal, walls, routed) {
   const f = [];
   // World -> ego as [forward, right]. Forward is -z rotated by heading, matching
   // the trolley convention; right is that turned 90 degrees. Getting this wrong
@@ -35,7 +37,10 @@ function policyObs(e, others, goal, walls) {
   const toEgo = (dx, dz) => [dx * hx + dz * hz, dx * rx + dz * rz];
 
   f.push(e.speed / 3.6);
-  const [gf, gl] = toEgo(goal.x - e.x, goal.z - e.z);
+  // The SUBGOAL, not the distant target: what the global planner says to head for
+  // next. This is the information the expert was actually acting on.
+  const sub = routed ? GlobalPlanner.next(e.x, e.z) : goal;
+  const [gf, gl] = toEgo(sub.x - e.x, sub.z - e.z);
   const gd = Math.hypot(gf, gl) || 1;
   f.push(Math.min(gd / 20, 1.5), Math.atan2(gl, gf));             // distance, bearing
 
@@ -70,15 +75,28 @@ function policyObs(e, others, goal, walls) {
 // Honesty: data from this is labelled "demonstration", never "human". When a
 // person actually plays, their run replaces it and the label changes.
 // ---------------------------------------------------------------------------
-const ScriptedDriver = {
+// The global planner. Standard robot navigation is a global planner that routes
+// through the building plus a local controller that deals with the people in
+// front of you. We learn the LOCAL half, which is the half human data is about;
+// the doorway route is geometry and needs no learning.
+//
+// This also fixes a real failure. When the policy was shown only the distant OR,
+// it was being asked to imitate an expert whose decisions depended on which
+// doorway it was heading for, information the observation did not contain. No
+// network can learn a function of something it cannot see. Closed-loop success
+// was 1 to 2 runs in 8 until the subgoal was made observable.
+const GlobalPlanner = {
   waypoints: [{ x: 1.5, z: 10 }, { x: -1.5, z: 2 }, { x: 1.5, z: -7 }, { x: 0, z: -15.5 }],
+  next(x, z) {
+    for (const w of this.waypoints) if (w.z < z - 0.5) return w;
+    return { x: LEVEL.goal.x, z: LEVEL.goal.z };
+  },
+};
+
+const ScriptedDriver = {
   reset() { this.i = 0; },
   act(e, agents) {
-    if (this.i === undefined) this.i = 0;
-    let w = this.waypoints[Math.min(this.i, this.waypoints.length - 1)];
-    if (Math.hypot(e.x - w.x, e.z - w.z) < 2.2 && this.i < this.waypoints.length - 1) {
-      this.i++; w = this.waypoints[this.i];
-    }
+    const w = GlobalPlanner.next(e.x, e.z);
     let tx = w.x - e.x, tz = w.z - e.z;
     const d = Math.hypot(tx, tz) || 1; tx /= d; tz /= d;
     let near = 9;
@@ -131,20 +149,71 @@ const MultiAgentTest = {
   },
 };
 
+// ---------------------------------------------------------------------------
+// SEED DEMONSTRATIONS, with recovery.
+//
+// Plain cloning fails here, and it fails for a well known reason: the learner
+// only ever sees states on the expert's ideal line, so the first small drift
+// puts it somewhere it has no idea about, and the error compounds. Measured, it
+// reached the goal 2 times in 8.
+//
+// The fix is DART (Laskey et al. 2017): EXECUTE a noisy action so the driver
+// wanders off the line, but LABEL the frame with what the expert would do at
+// that off-line state. The demonstrations then contain recovery, which clean
+// demonstrations never do. Starts are randomised for the same reason.
+// ---------------------------------------------------------------------------
+function collectDemos(trials, seconds, noise) {
+  const eps = [];
+  for (let t = 0; t < trials; t++) {
+    const c = createCrowd(LEVEL, []);
+    const e = { x: (Math.random() * 2 - 1) * 4.5, z: 14 + Math.random() * 4,
+                heading: (Math.random() * 2 - 1) * .7, speed: Math.random() * 1.6 };
+    ScriptedDriver.reset();
+    const dt = 1 / 30, frames = [];
+    for (let i = 0; i < seconds * 30; i++) {
+      const ag = c.step(dt);
+      const a = ScriptedDriver.act(e, ag);               // clean label
+      if (i % 3 === 0) frames.push({
+        frame: i, t: i * dt,
+        player: { x: e.x, z: e.z, vx: -Math.sin(e.heading) * e.speed, vz: -Math.cos(e.heading) * e.speed,
+                  yaw: e.heading, heading: e.heading, speed: e.speed, gaze: 0 },
+        action: { throttle: a.throttle, steer: a.steer },
+        goal: { x: LEVEL.goal.x, z: LEVEL.goal.z },
+        nearest: 1, collided: false, nearMiss: false, vitals: 80,
+        crowd: ag.map(q => [+q.x.toFixed(2), +q.z.toFixed(2), +q.vx.toFixed(2), +q.vz.toFixed(2), q.kind]),
+      });
+      const ex = { throttle: a.throttle + (Math.random() * 2 - 1) * noise,
+                   steer: a.steer + (Math.random() * 2 - 1) * noise * 1.5 };   // noisy execution
+      e.speed = Math.max(-1.2, Math.min(3.6, e.speed + ex.throttle * 6 * dt));
+      e.speed -= e.speed * 1.8 * dt;
+      e.heading -= ex.steer * 2.2 * (e.speed / 3.6) * dt;
+      const nx = e.x - Math.sin(e.heading) * e.speed * dt, nz = e.z - Math.cos(e.heading) * e.speed * dt;
+      let bl = false;
+      for (const w of LEVEL.walls)
+        if (Math.abs(nx - w.x) < w.w / 2 + .5 && Math.abs(nz - w.z) < w.d / 2 + .5) bl = true;
+      if (!bl) { e.x = nx; e.z = nz; } else e.speed *= .25;
+      if (Math.hypot(e.x - LEVEL.goal.x, e.z - LEVEL.goal.z) < 2.2) break;
+    }
+    eps.push(frames);
+  }
+  return eps;
+}
+
 const Policy = {
   net: null, norm: null, trained: false, busy: false, metrics: null, history: [],
+  quality: null,                  // closed-loop success rate, gates whether we show it
   drive: 'human',                 // 'human' | 'auto' | 'world'  (world = every agent)
   blind: false,                   // ablation: hide neighbours from every agent
   calls: 0,                       // policy evaluations, for the multi-agent readout
 
-  act(e, others, goal, walls) {
+  act(e, others, goal, walls, routed = true) {
     if (!this.net) return { throttle: 0, steer: 0 };
     this.calls++;
     // ABLATION: with `blind` on, each agent still runs its own policy but can no
     // longer see the others. If collisions spike, the agents were genuinely
     // deciding from their neighbours' state, which is what makes this multi-agent
     // rather than N independent goal-seekers that happen to share a room.
-    const f = policyObs(e, this.blind ? [] : others, goal, walls), n = this.norm;
+    const f = policyObs(e, this.blind ? [] : others, goal, walls, routed), n = this.norm;
     const x = new Float32Array(P_IN);
     for (let i = 0; i < P_IN; i++) x[i] = (f[i] - n.xm[i]) / n.xs[i];
     const a = forward(this.net, x), o = a[a.length - 1];
@@ -152,6 +221,35 @@ const Policy = {
       throttle: Math.max(-1, Math.min(1, o[0] * n.ys[0] + n.ym[0])),
       steer:    Math.max(-1, Math.min(1, o[1] * n.ys[1] + n.ym[1])),
     };
+  },
+
+  // Closed-loop test. Held-out action error says nothing about whether the policy
+  // can actually DRIVE, because errors compound once it is in the loop. This is
+  // the number that decides whether we let it take the wheel in front of judges.
+  evaluate(trials = 8, seconds = 40) {
+    if (!this.net) return 0;
+    let ok = 0;
+    for (let t = 0; t < trials; t++) {
+      const c = createCrowd(LEVEL, []);
+      const e = { x: 0, z: 17, heading: 0, speed: 0 };
+      const dt = 1 / 30;
+      for (let i = 0; i < seconds * 30; i++) {
+        const ag = c.step(dt);
+        const a = this.act(e, ag.map(q => ({ x: q.x, z: q.z, vx: q.vx, vz: q.vz })),
+                           LEVEL.goal, LEVEL.walls);
+        e.speed = Math.max(-1.2, Math.min(3.6, e.speed + a.throttle * 6 * dt));
+        e.speed -= e.speed * 1.8 * dt;
+        e.heading -= a.steer * 2.2 * (e.speed / 3.6) * dt;
+        const nx = e.x - Math.sin(e.heading) * e.speed * dt, nz = e.z - Math.cos(e.heading) * e.speed * dt;
+        let bl = false;
+        for (const w of LEVEL.walls)
+          if (Math.abs(nx - w.x) < w.w / 2 + .5 && Math.abs(nz - w.z) < w.d / 2 + .5) bl = true;
+        if (!bl) { e.x = nx; e.z = nz; } else e.speed *= .25;
+        if (Math.hypot(e.x - LEVEL.goal.x, e.z - LEVEL.goal.z) < 2.2) { ok++; break; }
+      }
+    }
+    this.quality = ok / trials;
+    return this.quality;
   },
 
   // Build (observation, action) pairs from the logged human runs.
@@ -163,7 +261,7 @@ const Policy = {
         const p = fr.player;
         const e = { x: p.x, z: p.z, heading: p.heading ?? Math.atan2(p.vx, p.vz), speed: p.speed ?? Math.hypot(p.vx, p.vz) };
         const others = fr.crowd.map(a => ({ x: a[0], z: a[1], vx: a[2], vz: a[3] }));
-        X.push(policyObs(e, others, fr.goal, walls));
+        X.push(policyObs(e, others, fr.goal, walls, true));   // gurney follows the route
         Y.push([fr.action.throttle, fr.action.steer]);
       }
     }
@@ -219,7 +317,8 @@ const Policy = {
         const a = forward(net, Xn[idx[k]]), o = a[a.length - 1];
         err += Math.hypot(o[0] - Yn[idx[k]][0], o[1] - Yn[idx[k]][1]); m++;
       }
-      this.metrics = { frames: n, err: err / m, trainN: split, valN: n - split,
+      const q = this.evaluate(8, 40);          // can it actually drive?
+      this.metrics = { frames: n, err: err / m, trainN: split, valN: n - split, quality: q,
                        arch: `${P_IN}-64-64-${P_OUT} MLP, ReLU, Adam`, history: this.history };
       this.busy = false;
       onDone(this.metrics);
