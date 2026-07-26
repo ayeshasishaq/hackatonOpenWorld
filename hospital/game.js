@@ -447,7 +447,9 @@ function loop() {
     if (collided && !wasHit) { health -= 9; stats.hit++; }
     if (nearMiss && !wasHit) stats.miss++;
     wasHit = collided;
-    health -= dt * 1.6;                                    // the patient is deteriorating
+    // The patient deteriorates, but slowly enough that a first-time driver who is
+    // still learning the controls is not cut off by a modal after half a minute.
+    health -= dt * 0.7;
 
     // ---- prediction overlay (PERF: ~12 Hz, not every frame; it is O(agents^2 * steps)) ----
     // The robot reuses these same forecasts, so we never compute them twice.
@@ -495,8 +497,16 @@ function loop() {
       $('dRows').textContent = Telemetry.rows.length + Trainer.episodes.length * 0;
     }
 
-    if (d < LEVEL.goal.r) finish(true);
-    else if (health <= 0) finish(false);
+    // Only interrupt with a modal when the RUN really ends. During the hands-off
+    // demo nothing should ever pop up over the video.
+    // In the hands-off demo the gurney arrives about 19 s in. Resetting the whole
+    // scene there flashed the entire ward mid-video, so only the gurney goes back
+    // to the door: the crowd, the camera and the logged data all continue.
+    if (d < LEVEL.goal.r) {
+      if (Demo.auto) { bed.x = LEVEL.spawn.x; bed.z = LEVEL.spawn.z; bed.heading = 0;
+                       bed.speed = 0; ScriptedDriver.reset(); health = 100; }
+      else finish(true);
+    } else if (health <= 0) { if (!Demo.auto) finish(false); else health = 100; }
   }
 
   // camera: first person while you drive, overhead while you watch the robots.
@@ -615,10 +625,13 @@ function setDrive(mode) {
 function cloneNow(cb) {
   if (Policy.busy) return;
   Trainer.addEpisode(Telemetry.frames);                 // include the run in progress
-  // Seed demonstrations so the page works cold, before anyone has played. A run
-  // you drive is added to these and the policy is cloned from both.
-  const eps = Trainer.episodes.length ? Trainer.episodes.concat(collectDemos(18, 45, .4))
-                                      : collectDemos(26, 45, .4);
+  $('cBig').textContent = 'collecting…';
+  // Seed demonstrations so the page works cold, before anyone has played. Chunked,
+  // because doing this synchronously froze the whole demo for several seconds.
+  collectDemosAsync(14, 45, .4,
+    seeds => runTraining(Trainer.episodes.concat(seeds)),
+    p => $('cBig').textContent = `${(p * 40) | 0}%`);
+  function runTraining(eps) {
   $('cBig').textContent = 'cloning…';
   Policy.train(eps, LEVEL.walls,
     p => $('cBig').textContent = `${(p * 100) | 0}%`,
@@ -642,6 +655,7 @@ function cloneNow(cb) {
       }
       if (cb) cb(m);
     });
+  }
 }
 $('bClone').onclick = () => Policy.trained ? setDrive(Policy.drive === 'auto' ? 'human' : 'auto') : cloneNow();
 $('bWorld').onclick = () => {

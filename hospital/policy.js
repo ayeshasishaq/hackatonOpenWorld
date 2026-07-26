@@ -162,6 +162,24 @@ const MultiAgentTest = {
 // that off-line state. The demonstrations then contain recovery, which clean
 // demonstrations never do. Starts are randomised for the same reason.
 // ---------------------------------------------------------------------------
+// Chunked version. Generating all of these in one go blocks the main thread for
+// seconds, which froze the demo solid right as it started. This yields between
+// episodes so rendering continues.
+function collectDemosAsync(trials, seconds, noise, onDone, onProgress) {
+  const eps = [];
+  let t = 0;
+  const step = () => {
+    const t0 = performance.now();
+    while (t < trials && performance.now() - t0 < 8) {     // ~8 ms budget per frame
+      eps.push(collectDemos(1, seconds, noise)[0]); t++;
+    }
+    if (onProgress) onProgress(t / trials);
+    if (t < trials) return setTimeout(step, 0);
+    onDone(eps);
+  };
+  setTimeout(step, 0);
+}
+
 function collectDemos(trials, seconds, noise) {
   const eps = [];
   for (let t = 0; t < trials; t++) {
