@@ -180,18 +180,93 @@ const Predictor = {
     return out;
   },
 
+  // Constant-velocity extrapolation of one sample's features. Feature 0 and 1 are
+  // the agent's own velocity, so this is the whole baseline.
+  cvOffsets(f) {
+    const y = new Float32Array(OUT_DIM);
+    for (let s = 0; s < FUT; s++) {
+      const dt = (s + 1) * this.DT;
+      y[s * 2] = f[0] * dt; y[s * 2 + 1] = f[1] * dt;
+    }
+    return y;
+  },
+
+  // Returns ABSOLUTE future offsets, but the network only supplies the RESIDUAL
+  // on top of constant velocity.
+  //
+  // Regressing the absolute offsets directly is what an MLP does badly here: with
+  // a squared loss it hedges toward the conditional mean, which systematically
+  // under-shoots displacement, and it loses to plain constant velocity — the exact
+  // result Schöller et al. 2020 report for a lot of deep predictors. Predicting the
+  // residual removes that failure by construction: the baseline is already in the
+  // output, so the worst the network can do is learn zero and tie, and everything
+  // it does learn is the part constant velocity cannot express (people slowing at
+  // walls, stepping around each other, turning at doorways).
   infer(f) {
     const n = this.norm, x = new Float32Array(IN_DIM);
     for (let i = 0; i < IN_DIM; i++) x[i] = (f[i] - n.xm[i]) / n.xs[i];
-    const a = forward(this.net, x), o = a[a.length - 1], y = new Float32Array(OUT_DIM);
-    for (let i = 0; i < OUT_DIM; i++) y[i] = o[i] * n.ys[i] + n.ym[i];
+    const a = forward(this.net, x), o = a[a.length - 1];
+    const y = this.cvOffsets(f);
+    for (let i = 0; i < OUT_DIM; i++) y[i] += o[i] * n.ys[i] + n.ym[i];
     return y;
   },
 };
 
 // ------------------------------------------------------------- training -----
+// How close a person has to be to the gurney before their predicted path is a
+// SAFETY question rather than background scenery. Liu et al., "Beyond ADE and
+// FDE" (arXiv 2510.10086), make this the centre of their critique: ADE and FDE
+// average nearby and distant agents together, so a model can post a good headline
+// number while being wrong about exactly the people you are about to hit. Every
+// metric below is therefore reported near / far as well as pooled.
+const NEAR_M = 3.5;
+
+// Did the learned model earn the right to be planned on? Judged on the near band
+// only. A model that wins pooled but loses close-in is worse than useless to a
+// planner, because close-in is the only range where its output changes a decision.
+function beatsBaseline(m) {
+  const b = m && m.strat && m.strat.near;
+  return !!(b && b.learned.n >= 100 && b.learned.fde < b.cv.fde);
+}
+
 const Trainer = {
-  episodes: [], X: [], Y: [], metrics: null, busy: false,
+  episodes: [], X: [], Y: [], D: [], metrics: null, busy: false,
+
+  // Budget knobs. The defaults keep an in-browser fit under about ten seconds.
+  // train_offline.js raises both, because a checkpoint is trained once and the
+  // near band needs far more than a few dozen samples before its number means
+  // anything.
+  MAX: 4000,        // samples kept after subsampling
+  EPOCHS: 35,
+  // Starting learning rate. 0.01 gets a usable fit inside ten seconds in a
+  // browser, but it overshoots: validation loss bottoms out within a handful of
+  // epochs and then climbs, which is how a predictor that should at worst tie
+  // constant velocity ends up losing to it. Offline runs turn it down.
+  LR0: 0.01,
+
+  // Install the predictor half of the shipped checkpoint. Same reasoning as the
+  // policy: a fit performed live is unverifiable, and the stratified near/far
+  // evaluation has to be on screen from the first second rather than hidden
+  // behind a button nobody presses.
+  loadCheckpoint(p) {
+    if (!p || !p.layers) return false;
+    const f = a => Float32Array.from(a);
+    Predictor.net = { t: 0, L: p.layers.map(l => ({
+      nin: l.nin, nout: l.nout, W: f(l.W), b: f(l.b),
+      mW: new Float32Array(l.W.length), vW: new Float32Array(l.W.length),
+      mb: new Float32Array(l.b.length), vb: new Float32Array(l.b.length),
+    })) };
+    Predictor.norm = { xm: f(p.norm.xm), xs: f(p.norm.xs), ym: f(p.norm.ym), ys: f(p.norm.ys) };
+    // Same gate as after a live fit: the checkpoint is only planned on if it beat
+    // constant velocity close-in. The weights load either way so the model card
+    // can report the result honestly, including when the result is a loss.
+    const won = beatsBaseline(p);
+    Predictor.mode = won ? 'learned' : 'physics';
+    Predictor.name = won ? `learned MLP (ADE ${p.adeL.toFixed(2)} m)`
+                         : 'physics (constant velocity + social force)';
+    this.metrics = { ...p, pretrained: true, beatsBaseline: won };
+    return true;
+  },
 
   addEpisode(frames) {
     if (frames && frames.length > HIST + FUT * STRIDE + 2) this.episodes.push(frames);
@@ -200,7 +275,7 @@ const Trainer = {
 
   // Turn logged episodes into (features -> future offsets) pairs.
   buildDataset() {
-    this.X = []; this.Y = [];
+    this.X = []; this.Y = []; this.D = [];
     for (const ep of this.episodes) {
       const last = ep.length - FUT * STRIDE - 1;
       for (let t = HIST; t < last; t++) {
@@ -213,14 +288,25 @@ const Trainer = {
             const p = ep[t + s * STRIDE].crowd[i];
             y.push(p[0] - cur[0], p[1] - cur[1]);
           }
-          this.X.push(featuresFrom(ep[t], past, i));
+          const f = featuresFrom(ep[t], past, i);
+          // Target is the RESIDUAL over constant velocity, not the raw offset.
+          // See Predictor.infer for why. Y stays residual all the way through
+          // training; the evaluation adds the baseline back before scoring, so
+          // ADE/FDE are still absolute metres and comparable to any other model.
+          const cv = Predictor.cvOffsets(f);
+          for (let k = 0; k < OUT_DIM; k++) y[k] -= cv[k];
+          this.X.push(f);
           this.Y.push(y);
+          // Range to the ego at prediction time. Kept alongside every sample so
+          // the held-out split can be stratified by it later.
+          const pl = ep[t].player;
+          this.D.push(Math.hypot(pl.x - cur[0], pl.z - cur[1]));
         }
       }
     }
     // Consecutive 10 Hz frames are almost identical, so a few thousand well-spread
     // samples train just as well and keep the live demo under ~10 s.
-    const MAX = 4000;
+    const MAX = this.MAX;
     if (this.X.length > MAX) {
       const keep = [...Array(this.X.length).keys()];
       for (let i = keep.length - 1; i > 0; i--) {
@@ -229,6 +315,7 @@ const Trainer = {
       const sel = keep.slice(0, MAX);
       this.X = sel.map(i => this.X[i]);
       this.Y = sel.map(i => this.Y[i]);
+      this.D = sel.map(i => this.D[i]);
     }
     return this.X.length;
   },
@@ -260,7 +347,7 @@ const Trainer = {
     const Xn = this.X.map(x => Float32Array.from(x, (v, i) => (v - norm.xm[i]) / norm.xs[i]));
     const Yn = this.Y.map(y => Float32Array.from(y, (v, i) => (v - norm.ym[i]) / norm.ys[i]));
 
-    const EPOCHS = 35;                 // enough to converge, keeps the live demo short
+    const EPOCHS = this.EPOCHS;
     let epoch = 0;
     this.history = [];                 // per-epoch train/val loss, so the curve is inspectable
     const mse = (from, to) => {
@@ -272,51 +359,95 @@ const Trainer = {
       }
       return s / (m * OUT_DIM);
     };
+    // EARLY STOPPING. Validation loss bottoms out well before the last epoch and
+    // then climbs, so shipping the final weights ships an overfit model — that
+    // alone was enough to put the predictor behind constant velocity. Keep a copy
+    // of the best-validation weights and restore them before evaluating.
+    let bestVal = Infinity, bestEpoch = 0, best = null;
+    const snapshot = () => net.L.map(l => ({ W: l.W.slice(), b: l.b.slice() }));
+    const restore = s => net.L.forEach((l, i) => { l.W.set(s[i].W); l.b.set(s[i].b); });
+
     const step = () => {
       for (let e = 0; e < 3 && epoch < EPOCHS; e++, epoch++) {          // 3 epochs per frame
-        const lr = .01 * (1 - epoch / EPOCHS) + .0005;
+        const lr = this.LR0 * (1 - epoch / EPOCHS) + this.LR0 * .05;
         for (let k = 0; k < split; k++) {
           const s = idx[k];
           backward(net, forward(net, Xn[s]), Yn[s], lr);
         }
-        this.history.push({ epoch, train: mse(0, Math.min(split, 400)), val: mse(split, n) });
+        const val = mse(split, n);
+        this.history.push({ epoch, train: mse(0, Math.min(split, 400)), val });
+        if (val < bestVal) { bestVal = val; bestEpoch = epoch; best = snapshot(); }
       }
       onProgress(epoch / EPOCHS);
       if (epoch < EPOCHS) return setTimeout(step, 0);   // setTimeout: keeps going if the tab blurs
-      // ---- evaluate on the held-out fifth ----
+      if (best) restore(best);
+      // ---- evaluate on the held-out fifth, POOLED and STRATIFIED BY RANGE ----
+      // The stratification is the point. A pooled ADE is dominated by the many
+      // people wandering far from the gurney, whose paths are nearly straight and
+      // therefore easy; the handful inside NEAR_M are the ones a planner has to
+      // get right, and they are the ones that manoeuvre. Reporting only the
+      // pooled number is precisely the failure Liu et al. describe.
       Predictor.net = net; Predictor.norm = norm;
-      let adeL = 0, fdeL = 0, m = 0;
+      const acc = () => ({ ade: 0, fde: 0, n: 0 });
+      const L = { all: acc(), near: acc(), far: acc() };     // learned MLP
+      const B = { all: acc(), near: acc(), far: acc() };     // constant velocity
+      const add = (g, ade, fde) => { g.ade += ade; g.fde += fde; g.n++; };
+
       for (let k = split; k < n; k++) {
-        const s = idx[k], p = Predictor.infer(this.X[s]), t = this.Y[s];
+        const s = idx[k], band = this.D[s] < NEAR_M ? 'near' : 'far';
+        // Y is stored as a residual, so rebuild the true absolute offsets before
+        // scoring. Both models are then measured in the same metres.
+        const cv = Predictor.cvOffsets(this.X[s]);
+        const t = new Float32Array(OUT_DIM);
+        for (let i = 0; i < OUT_DIM; i++) t[i] = this.Y[s][i] + cv[i];
+
+        const p = Predictor.infer(this.X[s]);
         let sum = 0;
         for (let f = 0; f < FUT; f++)
           sum += Math.hypot(p[f * 2] - t[f * 2], p[f * 2 + 1] - t[f * 2 + 1]);
-        adeL += sum / FUT;
-        fdeL += Math.hypot(p[(FUT - 1) * 2] - t[(FUT - 1) * 2], p[(FUT - 1) * 2 + 1] - t[(FUT - 1) * 2 + 1]);
-        m++;
-      }
-      // ---- same split, constant-velocity baseline (what the physics model does) ----
-      let adeB = 0, fdeB = 0;
-      for (let k = split; k < n; k++) {
-        const s = idx[k], f = this.X[s], t = this.Y[s];
-        const vx = f[0], vz = f[1];
-        let sum = 0;
+        const adeL = sum / FUT;
+        const fdeL = Math.hypot(p[(FUT - 1) * 2] - t[(FUT - 1) * 2],
+                                p[(FUT - 1) * 2 + 1] - t[(FUT - 1) * 2 + 1]);
+        add(L.all, adeL, fdeL); add(L[band], adeL, fdeL);
+
+        // Same sample, constant-velocity baseline. Schöller et al. 2020 showed
+        // this beats many deep predictors, so it is the baseline that matters.
+        // Its error is exactly the magnitude of the residual we asked the network
+        // to predict, which is what makes the comparison a fair one.
+        let sumB = 0, fdeB = 0;
         for (let q = 0; q < FUT; q++) {
-          const dt = (q + 1) * Predictor.DT;
-          sum += Math.hypot(vx * dt - t[q * 2], vz * dt - t[q * 2 + 1]);
-          if (q === FUT - 1) fdeB += Math.hypot(vx * dt - t[q * 2], vz * dt - t[q * 2 + 1]);
+          const e = Math.hypot(cv[q * 2] - t[q * 2], cv[q * 2 + 1] - t[q * 2 + 1]);
+          sumB += e;
+          if (q === FUT - 1) fdeB = e;
         }
-        adeB += sum / FUT;
+        const adeB = sumB / FUT;
+        add(B.all, adeB, fdeB); add(B[band], adeB, fdeB);
       }
+      const mean = g => g.n ? { ade: g.ade / g.n, fde: g.fde / g.n, n: g.n }
+                            : { ade: null, fde: null, n: 0 };
       this.metrics = {
         samples: n, episodes: this.episodes.length,
-        adeL: adeL / m, fdeL: fdeL / m, adeB: adeB / m, fdeB: fdeB / m,
+        adeL: L.all.ade / L.all.n, fdeL: L.all.fde / L.all.n,
+        adeB: B.all.ade / B.all.n, fdeB: B.all.fde / B.all.n,
+        // The stratified table. `nearM` travels with it so the threshold is never
+        // a magic number someone has to go digging for.
+        strat: { nearM: NEAR_M,
+                 near: { learned: mean(L.near), cv: mean(B.near) },
+                 far:  { learned: mean(L.far),  cv: mean(B.far) } },
         arch: `${IN_DIM}-48-48-${OUT_DIM} MLP, ReLU, Adam`,
         train: n - (n - split), trainN: split, valN: n - split,
+        bestEpoch, epochs: EPOCHS,
         history: this.history,
       };
-      Predictor.mode = 'learned';
-      Predictor.name = `learned MLP (ADE ${this.metrics.adeL.toFixed(2)} m)`;
+      // Only plan on the learned model if it actually earned it, judged on the
+      // NEAR band because that is the band a planner acts on. Losing to constant
+      // velocity and using it anyway would make the robot comparison in beat 4 a
+      // measure of our overfitting rather than of prediction.
+      this.metrics.beatsBaseline = beatsBaseline(this.metrics);
+      Predictor.mode = this.metrics.beatsBaseline ? 'learned' : 'physics';
+      Predictor.name = this.metrics.beatsBaseline
+        ? `learned MLP (ADE ${this.metrics.adeL.toFixed(2)} m)`
+        : `physics (constant velocity + social force) — the MLP did not beat it`;
       this.busy = false;
       onDone(this.metrics);
     };

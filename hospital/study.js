@@ -8,6 +8,13 @@
 // for the predictor: naive vs predictive planning across crowd density and
 // corridor geometry, same controller and map in every cell.
 //
+// Note on what "following the paper" means here. That paper proposes no model and
+// no training method — it is an evaluation framework. So we adopt its evaluation
+// in two places and claim nothing more: this file stratifies the PLANNER by
+// density and geometry, and predict.js stratifies the PREDICTOR by range to the
+// ego, which is the paper's sharpest point (ADE and FDE average nearby and
+// distant agents together and hide the failures that matter).
+//
 // Runs headless (no rendering), chunked so the page keeps painting.
 // ============================================================================
 

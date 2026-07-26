@@ -588,10 +588,23 @@ Demo.onEnter = a => {
     BOTS.predictive.x = BOTS.naive.x + 1.5; BOTS.predictive.z = BOTS.naive.z;
     BOTS.predictive.gx = BOTS.naive.gx; BOTS.predictive.gz = BOTS.naive.gz;
   }
-  if (a.id === 'honest' && Study.results) {
-    const open = Study.results.filter(r => r.geom === 'open floor' && r.hitGain !== null);
-    if (open.length) $('hBig').textContent =
-      '+' + Math.round(Math.max(...open.map(r => r.hitGain))) + '%';
+  // Beat 2's headline comes straight off the shipped checkpoint, so the number is
+  // on screen from the first second rather than after someone presses a button.
+  // It is the NEAR band, not the pooled figure: distant people are easy and
+  // averaging them in is the exact thing Liu et al. warn about.
+  if (a.id === 'data' && Trainer.metrics && Trainer.metrics.strat) {
+    const m = Trainer.metrics, near = m.strat.near;
+    if (near.learned.n) {
+      const gain = 100 * (1 - near.learned.fde / near.cv.fde);
+      const good = gain >= 0;
+      $('dBig').innerHTML = `<span style="color:${good ? '#5ff3b4' : '#ffc24d'}">`
+        + `${good ? '−' : '+'}${Math.abs(gain).toFixed(0)}%</span> error`;
+      $('dSub').textContent = good
+        ? `at 1.6 s ahead, against constant velocity, for people within ${m.strat.nearM} m of the `
+          + `gurney. Held out, ${near.learned.n} samples.`
+        : `The learned model LOSES to constant velocity close in, so the planner keeps the physics `
+          + `model. Measured on ${near.learned.n} held-out samples within ${m.strat.nearM} m.`;
+    }
   }
 };
 
@@ -622,40 +635,36 @@ function setDrive(mode) {
   $('cDrive').style.color = mode === 'human' ? '#e8edf7' : '#5ff3b4';
   $('bWorld').classList.toggle('pri', mode === 'world');
 }
+// Hand the wheel to the shipped checkpoint.
+//
+// This used to collect 14 episodes and fit a network live, on stage, behind a
+// progress bar. That was the weakest thing in the demo: a percentage counting up
+// is indistinguishable from a timer, so it read as theatre rather than evidence,
+// and a fit that happened to land badly would have taken the run down with it.
+// The weights are now trained ahead of time by hospital/train_offline.js, which
+// refuses to emit a checkpoint scoring under 90% closed-loop, and the model card
+// reports that run's measurements rather than a number invented on the day.
 function cloneNow(cb) {
-  if (Policy.busy) return;
-  Trainer.addEpisode(Telemetry.frames);                 // include the run in progress
-  $('cBig').textContent = 'collecting…';
-  // Seed demonstrations so the page works cold, before anyone has played. Chunked,
-  // because doing this synchronously froze the whole demo for several seconds.
-  collectDemosAsync(14, 45, .4,
-    seeds => runTraining(Trainer.episodes.concat(seeds)),
-    p => $('cBig').textContent = `${(p * 40) | 0}%`);
-  function runTraining(eps) {
-  $('cBig').textContent = 'cloning…';
-  Policy.train(eps, LEVEL.walls,
-    p => $('cBig').textContent = `${(p * 100) | 0}%`,
-    m => {
-      if (m.error) { $('cBig').textContent = 'need more'; $('cSub').textContent = m.error; return; }
-      const pct = Math.round((m.quality || 0) * 100);
-      $('cFrames').textContent = m.frames;
-      // QUALITY GATE. Held-out error says nothing about whether it can drive, so
-      // we roll it out first. A policy that cannot drive never takes the wheel in
-      // front of a judge; the scripted driver keeps going instead.
-      if ((m.quality || 0) >= .6) {
-        $('cBig').innerHTML = `<span class="green">${pct}%</span> success`;
-        $('cSub').textContent = 'closed-loop: it reaches the OR on its own. Handing over the controls.';
-        drawMini('cCurve', m.history);
-        setDrive('auto');
-      } else {
-        $('cBig').innerHTML = `<span style="color:#ffc24d">${pct}%</span> success`;
-        $('cSub').textContent = 'not good enough to drive yet, so it stays a passenger. More demonstrations would fix it.';
-        drawMini('cCurve', m.history);
-        Policy.drive = 'scripted';
-      }
-      if (cb) cb(m);
-    });
+  if (!Policy.trained) {                    // checkpoint.js missing or malformed
+    $('cBig').textContent = 'no model';
+    $('cSub').textContent = 'checkpoint.js did not load, so the scripted driver keeps going.';
+    Policy.drive = 'scripted';
+    return;
   }
+  const m = Policy.metrics, K = Policy.ckpt;
+  const pct = Math.round((m.quality || 0) * 100);
+  $('cFrames').textContent = m.frames;
+  $('cBig').innerHTML = `<span class="green">${pct}%</span> success`;
+  $('cSub').textContent = K
+    ? `closed-loop on ${K.closedLoopTrials} held-out runs. It reaches the OR on its own. Handing over the controls.`
+    : 'closed-loop: it reaches the OR on its own. Handing over the controls.';
+  drawMini('cCurve', m.history);
+  // In the hands-off sequence the handover is its own beat, fired by the 'drive'
+  // cue, so this only fills the panel. Loading used to take ~15 s and the two
+  // happened to coincide; now that it is instant, doing both here would have the
+  // model take the wheel a whole beat before the caption says so.
+  if (!Demo.auto) setDrive('auto');
+  if (cb) cb(m);
 }
 $('bClone').onclick = () => Policy.trained ? setDrive(Policy.drive === 'auto' ? 'human' : 'auto') : cloneNow();
 $('bWorld').onclick = () => {
@@ -707,34 +716,93 @@ function lossChart(hist, w = 620, h = 130) {
     <span style="color:#5ff3b4">held-out validation</span> · MSE on standardised targets</div>`;
 }
 
+// The stratified table from Liu et al.: the same held-out samples, split by how
+// far the person was from the gurney when the prediction was made. If the pooled
+// number improves but the near band does not, the model got better at the people
+// who were never going to be a problem. That is the whole argument of the paper,
+// and it is worth showing even when it makes us look worse.
+function stratTable(s) {
+  const row = (label, band) => {
+    if (!band.learned.n) return '';
+    const gain = 100 * (1 - band.learned.fde / band.cv.fde);
+    const col = gain > 2 ? '#5ff3b4' : gain < -2 ? '#ff7a45' : '#8792ad';
+    return `<tr><td style="text-align:left">${label}</td>
+      <td>${band.learned.n}</td>
+      <td>${band.cv.ade.toFixed(3)} → ${band.learned.ade.toFixed(3)}</td>
+      <td>${band.cv.fde.toFixed(3)} → ${band.learned.fde.toFixed(3)}</td>
+      <td style="color:${col}">${gain >= 0 ? '−' : '+'}${Math.abs(gain).toFixed(0)}%</td></tr>`;
+  };
+  return `<div class="cite" style="margin-top:10px">Stratified by range to the gurney, after Liu et al.,
+      "Beyond ADE and FDE" (arXiv 2510.10086). Pooled ADE/FDE average nearby and distant people together;
+      only the near band is a safety question.</div>
+    <table style="width:100%;border-collapse:collapse;font-size:11.5px;
+                  font-family:ui-monospace,Menlo,monospace;margin-top:6px">
+      <tr style="color:#5f6b85"><th style="text-align:left;font-weight:500">band</th>
+        <th style="text-align:right;font-weight:500">n</th>
+        <th style="text-align:right;font-weight:500">ADE cv → ours</th>
+        <th style="text-align:right;font-weight:500">FDE cv → ours</th>
+        <th style="text-align:right;font-weight:500">FDE gain</th></tr>
+      ${row(`near (&lt; ${s.nearM} m)`, s.near)}
+      ${row(`far (&ge; ${s.nearM} m)`, s.far)}
+    </table>`;
+}
+
 function showCard() {
   const P = Trainer.metrics, C = Policy.metrics;
   const kv = (k, v) => `<div class="kv"><span>${k}</span><b>${v}</b></div>`;
   let h = '';
 
   h += '<h5>1. CROWD PREDICTOR — where people will be</h5>';
-  if (!P) h += '<div class="cite">not trained yet in this session</div>';
+  if (!P) h += '<div class="cite">no checkpoint loaded</div>';
   else {
     h += kv('architecture', P.arch);
     h += kv('input', '27 dims: own velocity, 3 frames of displacement, 4 nearest bodies (rel pos+vel), nearest wall');
     h += kv('output', '16 dims: 8 future offsets at 0.2 s (1.6 s horizon)');
+    h += kv('parameterisation', 'residual over constant velocity');
     h += kv('training data', `${P.samples} samples from ${P.episodes} logged episode(s), 10 Hz`);
+    if (P.pretrained) h += kv('demonstrator', Policy.ckpt ? Policy.ckpt.source : 'scripted expert');
     h += kv('split', `${P.trainN} train / ${P.valN} held-out`);
     h += kv('ADE  physics → learned', `${P.adeB.toFixed(3)} → ${P.adeL.toFixed(3)} m`);
     h += kv('FDE  physics → learned', `${P.fdeB.toFixed(3)} → ${P.fdeL.toFixed(3)} m`);
+    if (P.bestEpoch != null)
+      h += kv('early stopping', `best validation at epoch ${P.bestEpoch} of ${P.epochs}`);
+    h += kv('planned on?', P.beatsBaseline
+      ? 'yes — it beat constant velocity close in'
+      : 'NO — physics model used instead');
     h += lossChart(P.history);
+    if (P.strat) h += stratTable(P.strat);
+    if (!P.beatsBaseline) h += `<div class="cite" style="margin-top:8px;color:#ffc24d">
+      This is a negative result and it is left in. The learned predictor does not beat constant
+      velocity inside ${P.strat ? P.strat.nearM : 3.5} m, so the robot plans on the physics model and
+      the MLP is reported, not used. Schöller et al. 2020 found the same thing across a range of
+      published predictors; the crowd here is driven by simple steering, which is close to the one
+      thing constant velocity models perfectly.</div>`;
   }
 
   h += '<h5>2. CLONED POLICY — what a driver does</h5>';
-  if (!C) h += '<div class="cite">not cloned yet in this session</div>';
+  if (!C) h += '<div class="cite">no checkpoint loaded</div>';
   else {
+    const K = Policy.ckpt;
     h += kv('architecture', C.arch);
     h += kv('input', '26 dims, egocentric: own speed, goal bearing, 5 nearest bodies, nearest wall');
     h += kv('output', '2 dims: throttle, steer');
-    h += kv('training data', `${C.frames} (observation, action) pairs`);
+    h += kv('training data', `${C.frames} (observation, action) pairs`
+      + (K ? ` from ${K.episodes} episodes` : ''));
+    if (K) h += kv('demonstrator', K.source);
     h += kv('split', `${C.trainN} train / ${C.valN} held-out`);
     h += kv('held-out action error', C.err.toFixed(3) + ' (standardised)');
+    if (C.quality != null)
+      h += kv('closed-loop success', `${Math.round(C.quality * (K ? K.closedLoopTrials : 8))}/`
+        + `${K ? K.closedLoopTrials : 8} runs reached the OR (${(C.quality * 100).toFixed(0)}%)`);
     h += lossChart(C.history);
+    // Where the weights came from, stated plainly. A model trained live on stage
+    // is indistinguishable from a progress bar, so this one was trained ahead of
+    // time by a script that is in the repo and the numbers above are that run's.
+    if (K) h += `<div class="cite" style="margin-top:8px">Weights are a checkpoint, not a live fit:
+      trained offline by <b>hospital/train_offline.js</b> over ${K.epochs} epochs, on ${K.episodes}
+      episodes with DART noise ${K.dart_noise} injected into execution and clean expert labels
+      (Laskey et al. 2017). Every number in this section was measured by that run. The script refuses
+      to write a checkpoint that scores under 90% closed-loop.</div>`;
   }
 
   h += '<h5>3. IS IT REALLY MULTI-AGENT?</h5>';
@@ -753,13 +821,28 @@ function showCard() {
     SmolVLA, OpenVLA). Neighbour-conditioned trajectory prediction is the idea behind Social-LSTM
     (Alahi 2016) and Social GAN (Gupta 2018) — ours is an MLP, not an LSTM or a GAN, so it is inspired
     by them, not an implementation of them.<br>
-    <b>Baselines and evaluation:</b> constant-velocity is a deliberately strong baseline after
-    Schöller et al. 2020, which showed it beats many deep predictors. ADE/FDE are the standard metrics.
-    Stratifying by density and geometry follows Liu et al., "Beyond ADE and FDE".<br>
+    <b>The evaluation is where we follow a paper closely:</b> Liu et al., "Beyond ADE and FDE"
+    (arXiv 2510.10086, Oct 2025). It proposes no model and no training method — it is an evaluation
+    framework, and its argument is that pooled ADE/FDE hide safety-critical failure because they average
+    nearby and distant agents together. We adopt that: the predictor is scored near vs far
+    (§1 above) and the planner is scored across crowd density and corridor geometry (the study).
+    We follow its evaluation; we do not reproduce a model from it, because it does not contain one.<br>
+    <b>Baselines:</b> constant-velocity is a deliberately strong baseline after Schöller et al. 2020,
+    which showed it beats many deep predictors. ADE/FDE are the standard metrics.<br>
+    <b>One modelling choice worth naming:</b> the predictor outputs a residual on top of constant
+    velocity rather than raw offsets. Regressing offsets directly made it LOSE to the baseline — the
+    squared loss pulls it toward the mean and it under-shoots displacement, which is the Schöller result
+    happening to us. With the baseline inside the output the network can only add the part constant
+    velocity cannot express. The number above is what that change bought.<br>
     <b>Diagnoses we cite, not solve:</b> the freezing robot problem (Trautman &amp; Krause 2010);
     distribution shift in cloning, and the DART/DAgger fixes (Laskey 2017; Ross 2011).<br>
     <b>Not AI at all, and labelled as such:</b> the robot's potential-field planner, and the default
-    hand-written crowd steering.</div>`;
+    hand-written crowd steering.<br>
+    <b>Where the demonstrations come from:</b> a hand-written waypoint controller in this simulation,
+    not a person and not a real hospital. That is the honest limit of what is on screen. The claim the
+    build is making is about the RECORDING, not the demonstrator: a game captures the control input at
+    every frame, so each frame is a real (observation, action) pair, which is exactly what Ego4D and
+    ETH/UCY lack. Swap the demonstrator for a human and nothing in the pipeline changes.</div>`;
 
   $('cardBody').innerHTML = h;
   $('card').style.display = 'block';
@@ -838,7 +921,7 @@ addEventListener('keydown', e => {
 Demo.onCue = cue => {
   if (cue === 'scripted') { reset(); Policy.drive = 'scripted'; ScriptedDriver.reset(); }
   else if (cue === 'train') { if (!Trainer.busy) trainNow(); }
-  else if (cue === 'clone') { if (!Policy.trained && !Policy.busy) cloneNow(); }
+  else if (cue === 'clone') { cloneNow(); }
   else if (cue === 'drive') {
     if (Policy.trained && Policy.quality >= .6) setDrive('auto');
   } else if (cue === 'world') {
@@ -848,7 +931,7 @@ Demo.onCue = cue => {
   }
   else if (cue === 'end') {
     Demo.stopAuto();
-    $('over').innerHTML = `<h2 style="color:#5ff3b4">Human demonstrations in. Robot behaviour out.</h2>
+    $('over').innerHTML = `<h2 style="color:#5ff3b4">Demonstrations in. Robot behaviour out.</h2>
       <p>Every run logs (observation, action) pairs. A policy clones them. A robot plans with them.</p>
       <p style="color:#8792ad;font-size:13px">ETH/UCY compatible · Social GAN and Human Scene Transformer</p>
       <div style="margin-top:14px">
@@ -864,9 +947,6 @@ function startAuto() {
   started = true; $('start').style.display = 'none';
   reset(); Demo.startAuto(); Demo.go(0);
   Policy.drive = 'scripted'; ScriptedDriver.reset();
-  // Clone in the background during Act 1 so the policy is ready and vetted by the
-  // time the sequence hands it the wheel.
-  if (!Policy.trained && !Policy.busy) setTimeout(() => cloneNow(), 400);
 }
 $('bAuto').onclick = startAuto;
 function takeTheWheel() {
@@ -878,5 +958,22 @@ $('bDrive').onclick = takeTheWheel;
 
 Demo.go(0);
 
+
+// Load the shipped weights before anything can ask the policy to drive. If the
+// file is missing the page still runs: the scripted driver covers every beat and
+// the model card says plainly that no checkpoint loaded.
+if (typeof CHECKPOINT !== 'undefined' && Policy.loadCheckpoint(CHECKPOINT)) {
+  console.log(`[policy] checkpoint loaded: ${CHECKPOINT.episodes} episodes, `
+    + `${CHECKPOINT.frames} pairs, ${(CHECKPOINT.quality * 100).toFixed(0)}% closed-loop`);
+  if (Trainer.loadCheckpoint(CHECKPOINT.predictor)) {
+    const p = CHECKPOINT.predictor;
+    console.log(`[predictor] checkpoint loaded: ADE ${p.adeB.toFixed(3)} → ${p.adeL.toFixed(3)} m`);
+    $('aMode').textContent = 'learned MLP';
+    $('aAde').textContent = `${p.adeB.toFixed(2)} → ${p.adeL.toFixed(2)} m`;
+    $('aFde').textContent = `${p.fdeB.toFixed(2)} → ${p.fdeL.toFixed(2)} m`;
+  }
+} else {
+  console.warn('[policy] no checkpoint — the scripted driver will do the driving');
+}
 
 reset(); started = false; loop();

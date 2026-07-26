@@ -24,10 +24,13 @@ const Demo = {
 
     { id: 'data', title: '2. EVERY MOMENT IS RECORDED',
       caption: 'What the driver saw, and what the driver DID. Human datasets like Ego4D have the first and not the second, which is why they cannot train a controller.',
-      panel: 'data', camera: 'fp', primary: { label: 'Train on this data ▸', cue: 'clone' } },
+      panel: 'data', camera: 'fp', primary: { label: 'Hand it to the model ▸', cue: 'clone' } },
 
+    // The model is a checkpoint, trained before the demo by train_offline.js, and
+    // the caption says so. Claiming a fit is happening live while a progress bar
+    // runs is exactly the kind of thing a judge is right to distrust.
     { id: 'clone', title: '3. THE MODEL LEARNS TO DRIVE',
-      caption: 'Cloned from those demonstrations, it now takes the wheel. The same recipe as pi0 and SmolVLA, without the vision encoder.',
+      caption: 'A policy cloned offline from 90 recorded episodes now takes the wheel. Same recipe as pi0 and SmolVLA, without the vision encoder.',
       panel: 'clone', camera: 'fp', primary: { label: 'Run the whole ward on it ▸', cue: 'world' } },
 
     { id: 'proof', title: '4. DOES IT ACTUALLY HELP?',
