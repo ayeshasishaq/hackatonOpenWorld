@@ -599,11 +599,17 @@ Demo.onEnter = a => {
       const good = gain >= 0;
       $('dBig').innerHTML = `<span style="color:${good ? '#5ff3b4' : '#ffc24d'}">`
         + `${good ? '−' : '+'}${Math.abs(gain).toFixed(0)}%</span> error`;
+      const pooled = 100 * (1 - m.fdeL / m.fdeB);
       $('dSub').textContent = good
         ? `at 1.6 s ahead, against constant velocity, for people within ${m.strat.nearM} m of the `
           + `gurney. Held out, ${near.learned.n} samples.`
-        : `The learned model LOSES to constant velocity close in, so the planner keeps the physics `
-          + `model. Measured on ${near.learned.n} held-out samples within ${m.strat.nearM} m.`;
+        // Beat 2 is where a judge decides whether to believe the numbers, so it
+        // gets the same honesty as the card: the pooled figure looks fine and
+        // the stratified one does not.
+        : `worse than constant velocity, for people within ${m.strat.nearM} m. Pooled over everyone `
+          + `it is ${Math.abs(pooled) < 1 ? 'a dead tie'
+              : (pooled >= 0 ? '−' : '+') + Math.abs(pooled).toFixed(0) + '%'}, which is the point: `
+          + `the average hides it. The planner keeps the physics model.`;
     }
   }
 };
@@ -771,12 +777,34 @@ function showCard() {
       : 'NO — physics model used instead');
     h += lossChart(P.history);
     if (P.strat) h += stratTable(P.strat);
-    if (!P.beatsBaseline) h += `<div class="cite" style="margin-top:8px;color:#ffc24d">
-      This is a negative result and it is left in. The learned predictor does not beat constant
-      velocity inside ${P.strat ? P.strat.nearM : 3.5} m, so the robot plans on the physics model and
-      the MLP is reported, not used. Schöller et al. 2020 found the same thing across a range of
-      published predictors; the crowd here is driven by simple steering, which is close to the one
-      thing constant velocity models perfectly.</div>`;
+    if (!P.beatsBaseline) {
+      const pooled = 100 * (1 - P.fdeL / P.fdeB);
+      const far = P.strat && P.strat.far.learned.n
+        ? 100 * (1 - P.strat.far.learned.fde / P.strat.far.cv.fde) : null;
+      const nearGain = P.strat && P.strat.near.learned.n
+        ? 100 * (1 - P.strat.near.learned.fde / P.strat.near.cv.fde) : null;
+      // The most useful thing this model does is fail in the shape the paper
+      // predicts, so say that rather than burying it. When pooled looks fine and
+      // the near band is worse, the stratification is not decoration: it is the
+      // only reason anyone would know.
+      const hides = far !== null && nearGain !== null && pooled > -2 && far > nearGain + 3;
+      h += `<div class="cite" style="margin-top:8px;color:#ffc24d">
+        <b>A negative result, left in.</b> ${hides
+          ? `Read the pooled row on its own and this model looks fine: FDE
+             ${P.fdeB.toFixed(3)} → ${P.fdeL.toFixed(3)} m, a tie. Stratified, it is
+             ${Math.abs(far).toFixed(0)}% BETTER on distant people and
+             ${Math.abs(nearGain).toFixed(0)}% WORSE on the ones within
+             ${P.strat.nearM} m of the gurney. It got good at the easy half and worse at the half a
+             planner actually acts on, and the pooled number hides that completely. That is the
+             argument of Liu et al. happening to our own model, which is why the stratified table is
+             the one on screen.`
+          : `The learned predictor does not beat constant velocity inside
+             ${P.strat ? P.strat.nearM : 3.5} m.`}
+        So the robot plans on the physics model and the MLP is reported, not used. Schöller et al.
+        2020 found deep predictors losing to constant velocity across a range of published work; the
+        crowd here is driven by simple steering, which is close to the one thing constant velocity
+        models perfectly.</div>`;
+    }
   }
 
   h += '<h5>2. CLONED POLICY — what a driver does</h5>';
