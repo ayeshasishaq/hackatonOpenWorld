@@ -819,16 +819,19 @@ $('bStudy').onclick = () => {
 $('sClose').onclick = () => $('study').style.display = 'none';
 $('sCopy').onclick = () => navigator.clipboard?.writeText(Study.asText());
 
+// W/A/S/D belong to the driver, so NOTHING else may claim a letter key: `a` used
+// to open the model card, which meant steering left mid-run threw a modal over
+// the screen. Every action here has a visible button; the only keys left are
+// Escape (close a modal) and Space (advance the story), and Space is ignored
+// while the human is driving so it cannot yank the caption out from under them.
 addEventListener('keydown', e => {
   if (!started) return;
-  const k = e.key.toLowerCase();
-  if (e.code === 'Space') { e.preventDefault(); Demo.next(); }
-  else if (k === 't') trainNow();
-  else if (k === 'c') $('bClone').click();
-  else if (k === 'v') $('bWorld').click();
-  else if (k === 'a') showCard();
-  else if (k === 'm') showCard();
-  else if (k === 'escape') $('study').style.display = 'none';
+  if (e.key === 'Escape') {
+    $('study').style.display = 'none';
+    $('card').style.display = 'none';
+  } else if (e.code === 'Space' && Policy.drive !== 'human' && !Demo.auto) {
+    e.preventDefault(); Demo.next();
+  }
 });
 
 // ---- hands-off cues: the 60 s sequence drives itself ----
