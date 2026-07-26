@@ -455,7 +455,8 @@ function loop() {
 
     // ---- both robots drive through the same crowd, as counterfactuals ----
     // They share a goal so you watch them pick different routes to the same place.
-    for (const k of ['naive', 'predictive']) {
+    // Skip the robots entirely until their beat: nothing to draw, nothing to cost.
+    for (const k of (Demo.current().id === 'proof' ? ['naive', 'predictive'] : [])) {
       const b = BOTS[k], ox = b.x, oz = b.z;
       b.step(dt, agents, lastPreds, LEVEL, SOLIDS, Predictor.DT);
       const moved = Math.hypot(b.x - ox, b.z - oz);
@@ -553,6 +554,17 @@ Demo.onEnter = a => {
   $('keys').style.display = (a.camera === 'fp' && !Demo.auto && Policy.drive === 'human')
     ? 'block' : 'none';
   gurney.visible = a.camera === 'fp';
+  // Only the current beat's objects exist on screen. The two robots belong to
+  // beat 4, so their bodies, name tags and trails stay hidden while a human is
+  // driving, and no AI is visible at all during beat 1.
+  const showRobots = a.id === 'proof';
+  for (const k of ['naive', 'predictive']) {
+    RIGS[k].g.visible = showRobots;
+    RIGS[k].trail.visible = showRobots;
+  }
+  showPredict = a.id !== 'play';
+  if (!showPredict) hidePredictions();
+
   if (a.camera === 'overhead') {                // snap the follow cam so it never starts blank
     camAim.x = (BOTS.naive.x + BOTS.predictive.x) / 2;
     camAim.z = (BOTS.naive.z + BOTS.predictive.z) / 2;
