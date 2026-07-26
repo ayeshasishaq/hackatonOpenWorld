@@ -1,0 +1,2140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Ward Runner — Hospital Delivery Robot</title>
+<style>
+  :root{
+    --bg:#0b0f14; --panel:#131a24; --panel2:#0f151d; --line:#22303f;
+    --muted:#7d8b9c; --text:#e6edf5; --accent:#7ddcff; --good:#5ce39a; --warn:#ffcc66; --bad:#ff6b6b;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:#05080b;color:var(--text);
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow:hidden;
+    -webkit-user-select:none;user-select:none}
+  #wrap{position:fixed;inset:0}
+  canvas{display:block;position:absolute;inset:0;width:100%;height:100%}
+  #scene{image-rendering:pixelated;image-rendering:crisp-edges;background:#05080b}
+  #hud{pointer-events:none}
+
+  .panel{position:absolute;background:rgba(19,26,36,.92);border:1px solid var(--line);
+    border-radius:14px;backdrop-filter:blur(6px);box-shadow:0 10px 30px rgba(0,0,0,.45)}
+
+  /* telemetry */
+  #tel{top:16px;right:16px;width:250px;overflow:hidden}
+  #tel .head{padding:9px 12px;text-align:center;font-size:12.5px;letter-spacing:.06em;
+    background:#16281f;color:var(--good);border-bottom:1px solid var(--line);transition:background .15s,color .15s}
+  #tel.caution .head{background:#2b2415;color:var(--warn)}
+  #tel.hit .head{background:#2e1717;color:var(--bad)}
+  #tel .rows{padding:9px 12px 11px}
+  .row{display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:3px 0}
+  .row .k{color:var(--muted)}
+  .row .v{color:var(--text);font-variant-numeric:tabular-nums}
+  .row .v.bad{color:var(--bad)} .row .v.warn{color:var(--warn)} .row .v.good{color:var(--good)}
+
+  /* task card */
+  #task{top:16px;left:16px;width:262px;padding:12px 14px}
+  #task .lbl{font-size:11px;color:var(--muted);letter-spacing:.14em;text-transform:uppercase}
+  #task .dest{font-size:20px;margin-top:4px;color:var(--accent);letter-spacing:.02em}
+  #task .sub{font-size:11.5px;color:var(--muted);margin-top:3px}
+  #bar{height:5px;background:#1d2836;border-radius:3px;margin-top:10px;overflow:hidden}
+  #barf{height:100%;width:0;background:linear-gradient(90deg,#7ddcff,#5ce39a);transition:width .08s linear}
+
+  /* time */
+  #clock{top:16px;left:50%;transform:translateX(-50%);padding:8px 18px;text-align:center}
+  #clock .t{font-size:26px;letter-spacing:.04em;font-variant-numeric:tabular-nums}
+  #clock .l{font-size:10px;color:var(--muted);letter-spacing:.18em;text-transform:uppercase}
+  #clock.low .t{color:var(--bad)}
+
+  /* toasts */
+  #toasts{position:absolute;left:50%;bottom:40vh;transform:translateX(-50%);
+    display:flex;flex-direction:column;align-items:center;gap:6px;width:min(560px,84vw)}
+  .toast{background:rgba(19,26,36,.94);border:1px solid var(--line);border-left:3px solid var(--accent);
+    border-radius:8px;padding:7px 14px;font-size:13px;opacity:0;transform:translateY(6px);
+    animation:tin .25s forwards;white-space:nowrap}
+  .toast.bad{border-left-color:var(--bad);color:#ffd8d8}
+  .toast.good{border-left-color:var(--good);color:#d6ffe9}
+  .toast.warn{border-left-color:var(--warn);color:#ffeec9}
+  @keyframes tin{to{opacity:1;transform:translateY(0)}}
+
+  /* overlays */
+  #overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    background:radial-gradient(ellipse at center,rgba(8,12,18,.82),rgba(3,5,8,.96));backdrop-filter:blur(3px)}
+  #overlay.hidden{display:none}
+  .card{width:min(660px,92vw);max-height:90vh;overflow-y:auto;background:rgba(15,21,29,.96);
+    border:1px solid var(--line);border-radius:18px;padding:26px 28px;
+    box-shadow:0 30px 80px rgba(0,0,0,.6);scrollbar-width:thin}
+  .card h1{margin:0;font-size:27px;letter-spacing:.02em}
+  .card h1 span{color:var(--accent)}
+  .card .tag{color:var(--muted);font-size:12.5px;margin-top:6px;letter-spacing:.03em}
+  .keys{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:18px 0 6px;font-size:13px}
+  .keys b{color:var(--accent);font-weight:600}
+  .keys span{color:#b9c6d4}
+  .diffs{display:flex;gap:10px;margin:16px 0 4px;flex-wrap:wrap}
+  .diff{flex:1 1 140px;background:#131a24;border:1px solid var(--line);border-radius:12px;padding:11px 13px;
+    cursor:pointer;transition:.15s}
+  .diff:hover{border-color:#3d566e;transform:translateY(-1px)}
+  .diff.sel{border-color:var(--accent);background:#16222e;box-shadow:0 0 0 1px rgba(125,220,255,.25) inset}
+  .diff .n{font-size:14px}
+  .diff .d{font-size:11px;color:var(--muted);margin-top:3px;line-height:1.35}
+  .btn{margin-top:18px;display:inline-block;background:var(--accent);color:#062232;border:none;
+    border-radius:12px;padding:13px 26px;font:inherit;font-size:15px;cursor:pointer;letter-spacing:.02em}
+  .btn:hover{filter:brightness(1.08)}
+  .btn.ghost{background:transparent;color:var(--text);border:1px solid var(--line);margin-left:10px}
+  .stats{display:grid;grid-template-columns:1fr 1fr;gap:6px 24px;margin:18px 0 4px;font-size:14px}
+  .stats div{display:flex;justify-content:space-between;border-bottom:1px dashed #1e2a38;padding:5px 0}
+  .stats .k{color:var(--muted)}
+  .hint{font-size:11.5px;color:var(--muted);margin-top:14px}
+
+  /* end-of-shift data capture */
+  .dhead{margin:22px 0 4px;font-size:15px;letter-spacing:.02em;color:var(--text);
+    border-top:1px solid var(--line);padding-top:16px}
+  .dhead em{display:block;font-style:normal;font-size:11px;color:var(--muted);margin-top:3px;letter-spacing:.04em}
+  .dnote{font-size:11.5px;color:var(--muted);line-height:1.5;margin:6px 0 12px}
+  .dgroup{font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);
+    margin:14px 0 6px;opacity:.85}
+  .drow{display:grid;grid-template-columns:minmax(150px,1.15fr) auto;gap:2px 12px;
+    padding:5px 0;border-bottom:1px dashed #1b2634;font-size:12.5px}
+  .drow .dk{color:#b9c6d4}
+  .drow .dv{color:var(--text);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .drow .dn{grid-column:1/-1;font-size:10.5px;color:var(--muted);line-height:1.4}
+  @media (max-width:520px){ .drow{grid-template-columns:1fr auto} }
+  #fade{position:absolute;inset:0;pointer-events:none;background:#ff2b2b;opacity:0;transition:opacity .18s}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="scene"></canvas>
+  <canvas id="hud"></canvas>
+  <div id="fade"></div>
+
+  <div class="panel" id="task">
+    <div class="lbl" id="phase">Collect patient from</div>
+    <div class="dest" id="dest">Room 212</div>
+    <div class="sub" id="destsub">Mrs Okafor · hip fracture</div>
+    <div class="sub" id="destsub2">→ Radiology</div>
+    <div id="bar"><div id="barf"></div></div>
+  </div>
+
+  <div class="panel" id="clock"><div class="t" id="tclock">1:30</div><div class="l">shift time</div></div>
+
+  <div class="panel" id="tel">
+    <div class="head" id="telhead">CLEAR</div>
+    <div class="rows">
+      <div class="row"><span class="k">transfers</span><span class="v" id="v-del">0</span></div>
+      <div class="row"><span class="k" id="k-dist">dist to room</span><span class="v" id="v-dist">0.0 m</span></div>
+      <div class="row"><span class="k">nearest human</span><span class="v" id="v-near">— m</span></div>
+      <div class="row"><span class="k">speed</span><span class="v" id="v-spd">0.0 m/s</span></div>
+      <div class="row"><span class="k">patient comfort</span><span class="v" id="v-com">—</span></div>
+      <div class="row"><span class="k">near-misses</span><span class="v" id="v-nm">0</span></div>
+      <div class="row"><span class="k">collisions</span><span class="v" id="v-col">0</span></div>
+    </div>
+  </div>
+
+  <div id="toasts"></div>
+
+  <div id="overlay">
+    <div class="card" id="card"></div>
+  </div>
+</div>
+<script>
+"use strict";
+/* ============================================================================
+   WARD RUNNER — first-person hospital delivery robot
+   Software raycasting renderer (no libraries, no assets).
+   ========================================================================== */
+
+const scene = document.getElementById('scene');
+const sctx  = scene.getContext('2d', {alpha:false});
+const hud   = document.getElementById('hud');
+const hctx  = hud.getContext('2d');
+const overlay = document.getElementById('overlay');
+const cardEl  = document.getElementById('card');
+const fadeEl  = document.getElementById('fade');
+
+/* ---------------------------------------------------------------- constants */
+const MW = 52, MH = 38;           // map cells
+const M_PER_CELL = 1.2;           // world scale
+const WALL_H = 2.4;               // cells (≈2.9 m ceiling)
+const EYE    = 0.80;              // robot camera height, cells (≈0.95 m)
+const FOV    = 78 * Math.PI/180;
+const PLANE  = Math.tan(FOV/2);
+const R_ROBOT = 0.32, R_HUMAN = 0.30;
+const FOG = [11,16,23];
+
+let RW = 400, RH = 225, VS = 245;  // render buffer + vertical scale
+let img=null, buf=null, zbuf=null;
+
+/* --------------------------------------------------------------- utilities */
+const clamp=(v,a,b)=>v<a?a:v>b?b:v;
+const lerp=(a,b,t)=>a+(b-a)*t;
+const rnd=(a,b)=>a+Math.random()*(b-a);
+const rint=(a,b)=>Math.floor(rnd(a,b+1));
+const pick=a=>a[Math.floor(Math.random()*a.length)];
+const pack=(r,g,b)=>(255<<24)|(b<<16)|(g<<8)|r;
+
+function makeCanvas(w,h){const c=document.createElement('canvas');c.width=w;c.height=h;return c;}
+function rasterize(w,h,draw){
+  const c=makeCanvas(w,h), g=c.getContext('2d');
+  g.imageSmoothingEnabled=false; draw(g,w,h);
+  const d=g.getImageData(0,0,w,h);
+  return {w,h,px:new Uint32Array(d.data.buffer.slice(0))};
+}
+
+/* ================================================================ TEXTURES */
+const TS = 64;                    // texture size
+const TEX=[], FTEX=[], CTEX=[];
+
+function noise(g,w,h,amt,alpha){
+  for(let i=0;i<amt;i++){
+    g.fillStyle=`rgba(0,0,0,${alpha})`;
+    g.fillRect(Math.random()*w|0, Math.random()*h|0, 1, 1);
+  }
+}
+function texWall(top,bottom,rail){
+  return rasterize(TS,TS,(g)=>{
+    g.fillStyle=top; g.fillRect(0,0,TS,TS);
+    g.fillStyle=bottom; g.fillRect(0,40,TS,24);          // wainscot
+    g.fillStyle=rail; g.fillRect(0,38,TS,3);             // bumper rail
+    g.fillStyle='rgba(255,255,255,.07)'; g.fillRect(0,37,TS,1);
+    g.fillStyle='rgba(0,0,0,.22)'; g.fillRect(0,43,TS,1);
+    g.fillStyle='rgba(0,0,0,.30)'; g.fillRect(0,62,TS,2); // baseboard shadow
+    g.fillStyle='rgba(255,255,255,.05)';g.fillRect(0,0,TS,2);
+    noise(g,TS,TS,420,.05);
+  });
+}
+function texTile(){
+  return rasterize(TS,TS,(g)=>{
+    g.fillStyle='#dfe8ea'; g.fillRect(0,0,TS,TS);
+    g.strokeStyle='rgba(120,140,150,.55)'; g.lineWidth=1;
+    for(let i=0;i<=TS;i+=16){g.beginPath();g.moveTo(i+.5,0);g.lineTo(i+.5,TS);g.stroke();
+      g.beginPath();g.moveTo(0,i+.5);g.lineTo(TS,i+.5);g.stroke();}
+    noise(g,TS,TS,300,.05);
+  });
+}
+function texWindow(){
+  return rasterize(TS,TS,(g)=>{
+    g.fillStyle='#c9d6d2'; g.fillRect(0,0,TS,TS);
+    const sky=g.createLinearGradient(0,6,0,40);
+    sky.addColorStop(0,'#0d1c2b'); sky.addColorStop(.6,'#1b3550'); sky.addColorStop(1,'#2a4a66');
+    g.fillStyle=sky; g.fillRect(6,6,52,34);
+    g.fillStyle='rgba(255,235,180,.75)';                  // distant city lights
+    for(let i=0;i<26;i++) g.fillRect(8+Math.random()*48|0, 26+Math.random()*12|0, 1, 1);
+    g.fillStyle='#9fb0ad'; g.fillRect(31,6,2,34); g.fillRect(6,22,52,2);
+    g.fillStyle='rgba(255,255,255,.10)'; g.fillRect(6,6,52,3);
+    g.fillStyle='#b7c4c0'; g.fillRect(4,40,56,4);
+    g.fillStyle='#aab8b5'; g.fillRect(0,44,TS,20);
+    noise(g,TS,TS,240,.05);
+  });
+}
+function texCounter(){
+  return rasterize(TS,TS,(g)=>{
+    g.fillStyle='#20303c'; g.fillRect(0,0,TS,TS);
+    g.fillStyle='#2b4152'; g.fillRect(0,26,TS,38);        // desk body
+    g.fillStyle='#8a6b46'; g.fillRect(0,22,TS,5);          // wood top
+    g.fillStyle='rgba(255,255,255,.16)'; g.fillRect(0,22,TS,1);
+    g.fillStyle='#16242e'; g.fillRect(4,34,26,18); g.fillRect(34,34,26,18);
+    g.fillStyle='rgba(125,220,255,.25)'; g.fillRect(6,10,20,8);   // glow sign
+    noise(g,TS,TS,260,.06);
+  });
+}
+function texDoor(num,color){
+  return rasterize(TS,TS,(g)=>{
+    g.fillStyle='#c2cdd2'; g.fillRect(0,0,TS,TS);
+    g.fillStyle='#8d9aa2'; g.fillRect(3,2,58,62);          // frame
+    g.fillStyle=color;     g.fillRect(6,4,52,60);          // door leaf
+    g.fillStyle='rgba(255,255,255,.13)'; g.fillRect(6,4,52,2);
+    g.fillStyle='rgba(0,0,0,.22)';       g.fillRect(6,60,52,4);
+    g.fillStyle='#1d2c38'; g.fillRect(14,10,36,18);        // vision panel
+    g.fillStyle='rgba(190,225,240,.35)'; g.fillRect(15,11,34,16);
+    g.fillStyle='rgba(255,255,255,.18)'; g.fillRect(15,11,34,4);
+    g.fillStyle='#e8eef2'; g.fillRect(18,32,28,11);        // number plate
+    g.fillStyle='#16212b'; g.font='bold 9px monospace'; g.textAlign='center';
+    g.fillText(String(num),32,41);
+    g.fillStyle='#d6dee3'; g.fillRect(50,44,5,3);          // handle
+    noise(g,TS,TS,180,.05);
+  });
+}
+function texElevator(){
+  return rasterize(TS,TS,(g)=>{
+    g.fillStyle='#7f8b93'; g.fillRect(0,0,TS,TS);
+    g.fillStyle='#98a5ad'; g.fillRect(4,4,56,60);
+    g.fillStyle='#6f7c85'; g.fillRect(31,4,2,60);
+    for(let i=6;i<60;i+=4){g.fillStyle='rgba(255,255,255,.05)';g.fillRect(4,i,56,1);}
+    g.fillStyle='#101a22'; g.fillRect(24,6,16,6);
+    g.fillStyle='#ff9b3d'; g.font='6px monospace'; g.textAlign='center'; g.fillText('▲ 2',32,11);
+  });
+}
+function texFloorVinyl(){
+  return rasterize(TS,TS,(g)=>{
+    g.fillStyle='#7f8b93'; g.fillRect(0,0,TS,TS);
+    g.fillStyle='rgba(255,255,255,.05)'; g.fillRect(0,0,TS,32);
+    g.strokeStyle='rgba(45,58,68,.55)'; g.lineWidth=1;
+    g.beginPath();g.moveTo(0,.5);g.lineTo(TS,.5);g.moveTo(.5,0);g.lineTo(.5,TS);g.stroke();
+    for(let i=0;i<500;i++){
+      g.fillStyle=Math.random()<.5?'rgba(255,255,255,.10)':'rgba(0,0,0,.10)';
+      g.fillRect(Math.random()*TS|0,Math.random()*TS|0,1,1);
+    }
+  });
+}
+function texFloorGuide(col,vertical){   // wayfinding stripe painted on the vinyl
+  const base=texFloorVinyl();
+  return rasterize(TS,TS,(g)=>{
+    const c=makeCanvas(TS,TS), cg=c.getContext('2d');
+    const d=cg.createImageData(TS,TS); new Uint32Array(d.data.buffer).set(base.px); cg.putImageData(d,0,0);
+    g.drawImage(c,0,0);
+    g.fillStyle=col;
+    if(vertical){ g.fillRect(27,0,10,TS); g.fillStyle='rgba(255,255,255,.14)'; g.fillRect(27,0,2,TS); }
+    else        { g.fillRect(0,27,TS,10); g.fillStyle='rgba(255,255,255,.14)'; g.fillRect(0,27,TS,2); }
+  });
+}
+function texFloorRoom(){
+  return rasterize(TS,TS,(g)=>{
+    g.fillStyle='#93917f'; g.fillRect(0,0,TS,TS);
+    g.fillStyle='#9c9a86'; g.fillRect(0,0,32,32); g.fillRect(32,32,32,32);
+    g.strokeStyle='rgba(60,58,50,.4)';
+    g.beginPath();g.moveTo(0,.5);g.lineTo(TS,.5);g.moveTo(.5,0);g.lineTo(.5,TS);g.stroke();
+    noise(g,TS,TS,600,.06);
+  });
+}
+function texFloorCarpet(){
+  return rasterize(TS,TS,(g)=>{
+    g.fillStyle='#3b4a52'; g.fillRect(0,0,TS,TS);
+    for(let i=0;i<1600;i++){
+      g.fillStyle=Math.random()<.5?'rgba(255,255,255,.06)':'rgba(0,0,0,.10)';
+      g.fillRect(Math.random()*TS|0,Math.random()*TS|0,1,1);
+    }
+  });
+}
+function texCeilTile(){
+  return rasterize(TS,TS,(g)=>{
+    g.fillStyle='#b9c3c9'; g.fillRect(0,0,TS,TS);
+    g.strokeStyle='rgba(90,105,115,.6)';
+    g.beginPath();g.moveTo(0,.5);g.lineTo(TS,.5);g.moveTo(.5,0);g.lineTo(.5,TS);g.stroke();
+    noise(g,TS,TS,700,.05);
+  });
+}
+function texCeilLight(){
+  return rasterize(TS,TS,(g)=>{
+    g.fillStyle='#b9c3c9'; g.fillRect(0,0,TS,TS);
+    g.fillStyle='#f3f9ff'; g.fillRect(8,20,48,24);
+    g.fillStyle='#ffffff'; g.fillRect(10,22,44,20);
+    g.fillStyle='#dfe8ef'; g.fillRect(8,20,48,2); g.fillRect(8,42,48,2);
+  });
+}
+
+/* texture ids */
+let TX_WALL, TX_TILE, TX_WIN, TX_COUNTER, TX_ELEV;
+let FT_VINYL, FT_GUIDE_A, FT_GUIDE_B, FT_GUIDE_AV, FT_GUIDE_BV, FT_ROOM, FT_CARPET;
+let CT_TILE, CT_LIGHT, TEX_BASE=0;
+function buildTextures(){
+  TEX.length=0; FTEX.length=0; CTEX.length=0;
+  TX_WALL   = TEX.push(texWall('#c8d6cf','#5d7f86','#2f4a52'))-1;
+  TX_TILE   = TEX.push(texTile())-1;
+  TX_WIN    = TEX.push(texWindow())-1;
+  TX_COUNTER= TEX.push(texCounter())-1;
+  TX_ELEV   = TEX.push(texElevator())-1;
+  FT_VINYL  = FTEX.push(texFloorVinyl())-1;
+  FT_GUIDE_A= FTEX.push(texFloorGuide('rgba(110,190,220,.55)',false))-1;
+  FT_GUIDE_B= FTEX.push(texFloorGuide('rgba(230,150,120,.5)',false))-1;
+  FT_GUIDE_AV=FTEX.push(texFloorGuide('rgba(110,190,220,.55)',true))-1;
+  FT_GUIDE_BV=FTEX.push(texFloorGuide('rgba(230,150,120,.5)',true))-1;
+  FT_ROOM   = FTEX.push(texFloorRoom())-1;
+  FT_CARPET = FTEX.push(texFloorCarpet())-1;
+  CT_TILE   = CTEX.push(texCeilTile())-1;
+  CT_LIGHT  = CTEX.push(texCeilLight())-1;
+  TEX_BASE  = TEX.length;                    // door textures are appended per map build
+}
+
+/* ================================================================== SPRITES */
+const SKIN=['#f0c9a4','#e0a877','#c98a5c','#9c643c','#7a4a2b','#5d3620','#f7d9bd'];
+const HAIR=['#2b1d15','#3d2a1c','#141414','#6b4a2a','#8c8c8c','#c8a25a','#5a3b2b','#e0e0e0'];
+const SCRUB_NURSE=['#2f8f8a','#2b7fb0','#3f7d5a','#5b6fb0'];
+const CASUAL=['#8e4b4b','#4b628e','#5b7a4b','#8a6a3d','#6d4b8e','#3f4a55','#a4643c'];
+
+function drawPerson(g,W,H,o){
+  const px=(x,y,w,h,c)=>{g.fillStyle=c;g.fillRect(x,y,w,h);};
+  const skin=o.skin, hair=o.hair, top=o.top, bot=o.bot, shoe=o.shoe;
+  // legs
+  px(9,40,5,20,bot); px(16,40,5,20,bot);
+  px(8,59,7,4,shoe); px(15,59,7,4,shoe);
+  // torso
+  px(6,21,18,20,top);
+  px(6,21,18,2,'rgba(255,255,255,.14)');
+  px(21,21,3,20,'rgba(0,0,0,.16)');
+  // arms
+  px(3,23,4,16,top); px(23,23,4,16,top);
+  px(3,38,4,4,skin); px(23,38,4,4,skin);
+  // neck + head
+  px(12,17,6,5,skin);
+  px(9,5,12,14,skin);
+  px(20,5,2,14,'rgba(0,0,0,.14)');
+  // hair
+  px(8,3,14,6,hair); px(8,3,3,10,hair); px(19,3,3,10,hair);
+  if(o.longHair){px(7,3,3,16,hair); px(20,3,3,16,hair);}
+  // eyes
+  px(11,11,2,2,'#20242b'); px(17,11,2,2,'#20242b');
+  if(o.mask){ px(10,13,10,6,'#dfeef2'); px(10,13,10,1,'#b9d2d8'); }
+  if(o.cap){ px(8,2,14,5,o.capColor||'#3f7d5a'); }
+  if(o.coat){ // lab coat over top
+    px(5,21,7,22,'#f2f6f8'); px(18,21,7,22,'#f2f6f8');
+    px(2,23,4,17,'#f2f6f8'); px(24,23,4,17,'#f2f6f8');
+    px(12,22,6,14,o.shirt||'#4a6b8a');
+    px(12,24,6,2,'#22303c');
+  }
+  if(o.badge){ px(20,29,3,4,'#e8eef2'); px(20,29,3,1,'#7ddcff'); }
+  if(o.stetho){ px(11,21,8,2,'#1c2630'); px(11,21,2,7,'#1c2630'); px(17,21,2,7,'#1c2630'); px(16,27,3,3,'#c9d3da'); }
+  if(o.gown){ // patient gown
+    px(6,21,18,24,'#cfe3ea');
+    for(let y=24;y<44;y+=5){ px(6,y,18,1,'rgba(90,140,160,.4)'); }
+    px(9,44,5,15,skin); px(16,44,5,15,skin);
+    px(8,58,7,4,'#e8eef2'); px(15,58,7,4,'#e8eef2');
+  }
+  if(o.clipboard){ px(23,30,7,9,'#c2a97a'); px(24,31,5,7,'#f4f7f9'); }
+  if(o.phone){ px(2,32,4,6,'#1a222c'); px(3,33,2,4,'#7ddcff'); }
+  // grounding shadow
+  px(7,62,16,2,'rgba(0,0,0,.35)');
+}
+
+function personSprite(kind){
+  const o={skin:pick(SKIN),hair:pick(HAIR),shoe:'#20262e',longHair:Math.random()<.45};
+  if(kind==='nurse'){ o.top=pick(SCRUB_NURSE); o.bot=o.top; o.badge=true; o.mask=Math.random()<.5; }
+  else if(kind==='doctor'){ o.top='#f2f6f8'; o.bot='#2b3644'; o.coat=true; o.shirt=pick(['#4a6b8a','#7a4a6b','#3f6b5a']);
+    o.stetho=true; o.badge=true; o.clipboard=Math.random()<.5; }
+  else if(kind==='surgeon'){ o.top='#3f7d5a'; o.bot='#3f7d5a'; o.mask=true; o.cap=true; o.capColor='#3f7d5a'; }
+  else if(kind==='patient'){ o.top='#cfe3ea'; o.bot='#cfe3ea'; o.gown=true; o.shoe='#e8eef2'; }
+  else if(kind==='janitor'){ o.top='#6b6f74'; o.bot='#3c4148'; o.badge=true; }
+  else { o.top=pick(CASUAL); o.bot=pick(['#2b3644','#3c4148','#4a3c33','#2e3b4a']); o.phone=Math.random()<.4; }
+  return rasterize(28,64,(g)=>drawPerson(g,28,64,o));
+}
+
+function wheelchairSprite(){
+  const o={skin:pick(SKIN),hair:pick(HAIR),top:'#cfe3ea',bot:'#cfe3ea',shoe:'#e8eef2'};
+  return rasterize(34,52,(g)=>{
+    const px=(x,y,w,h,c)=>{g.fillStyle=c;g.fillRect(x,y,w,h);};
+    // wheel
+    g.strokeStyle='#20262e'; g.lineWidth=3;
+    g.beginPath(); g.arc(17,38,13,0,Math.PI*2); g.stroke();
+    g.strokeStyle='#59636d'; g.lineWidth=1;
+    for(let a=0;a<6;a++){g.beginPath();g.moveTo(17,38);
+      g.lineTo(17+12*Math.cos(a*1.05),38+12*Math.sin(a*1.05));g.stroke();}
+    px(6,26,22,4,'#2b3644');                  // seat
+    px(25,8,4,20,'#2b3644');                  // back
+    // seated person
+    px(10,14,12,14,o.top);
+    px(11,28,5,8,o.skin); px(17,28,5,8,o.skin);
+    px(9,34,7,4,o.shoe); px(16,34,7,4,o.shoe);
+    px(12,3,9,12,o.skin); px(11,1,11,6,o.hair);
+    px(14,8,2,2,'#20242b'); px(18,8,2,2,'#20242b');
+    px(6,49,24,2,'rgba(0,0,0,.35)');
+  });
+}
+function gurneySprite(){
+  return rasterize(56,40,(g)=>{
+    const px=(x,y,w,h,c)=>{g.fillStyle=c;g.fillRect(x,y,w,h);};
+    px(2,14,52,7,'#dfe8ea');                    // mattress
+    px(2,14,52,2,'#f4f9fa');
+    px(4,10,20,5,'#b7c9d0');                    // pillow area
+    px(2,21,52,4,'#3a4a57');                    // frame
+    px(4,25,3,10,'#59636d'); px(49,25,3,10,'#59636d');
+    px(3,34,6,5,'#20262e'); px(47,34,6,5,'#20262e');
+    px(2,8,3,14,'#8a969e'); px(51,8,3,14,'#8a969e'); // rails
+    px(6,12,44,2,'rgba(255,255,255,.12)');
+    px(4,38,48,2,'rgba(0,0,0,.32)');
+  });
+}
+function cartSprite(){
+  return rasterize(30,42,(g)=>{
+    const px=(x,y,w,h,c)=>{g.fillStyle=c;g.fillRect(x,y,w,h);};
+    px(3,6,24,28,'#8e9aa2'); px(3,6,24,2,'#c3cdd3');
+    px(5,11,20,7,'#5d6a73'); px(5,20,20,7,'#5d6a73');
+    px(6,12,8,5,'#7ddcff'); px(16,21,8,5,'#ffcc66');
+    px(4,34,4,5,'#20262e'); px(22,34,4,5,'#20262e');
+    px(4,40,22,2,'rgba(0,0,0,.32)');
+  });
+}
+function ivSprite(){
+  return rasterize(18,58,(g)=>{
+    const px=(x,y,w,h,c)=>{g.fillStyle=c;g.fillRect(x,y,w,h);};
+    px(8,4,2,48,'#aab6bd');
+    px(4,4,10,2,'#aab6bd');
+    px(3,6,7,14,'rgba(190,225,240,.85)'); px(3,12,7,8,'rgba(150,205,235,.9)');
+    px(10,20,1,16,'rgba(220,240,250,.6)');
+    px(3,52,12,3,'#59636d');
+    px(2,55,3,3,'#20262e'); px(12,55,3,3,'#20262e');
+    px(3,57,12,1,'rgba(0,0,0,.3)');
+  });
+}
+function plantSprite(){
+  return rasterize(28,50,(g)=>{
+    const px=(x,y,w,h,c)=>{g.fillStyle=c;g.fillRect(x,y,w,h);};
+    px(8,36,12,12,'#7a5a42'); px(8,36,12,2,'#96745a');
+    for(let i=0;i<16;i++){
+      const x=4+Math.random()*20|0, y=6+Math.random()*30|0;
+      px(x,y,3+Math.random()*4|0,2+Math.random()*3|0, Math.random()<.5?'#3f6b45':'#4f8a54');
+    }
+    px(13,14,3,24,'#3a5c3d');
+    px(7,48,14,2,'rgba(0,0,0,.32)');
+  });
+}
+function chairSprite(){
+  return rasterize(24,30,(g)=>{
+    const px=(x,y,w,h,c)=>{g.fillStyle=c;g.fillRect(x,y,w,h);};
+    px(3,4,18,12,'#3d5a6b'); px(3,4,18,2,'#547587');
+    px(2,16,20,5,'#4a6b7d');
+    px(4,21,3,7,'#2b3644'); px(17,21,3,7,'#2b3644');
+    px(3,28,18,2,'rgba(0,0,0,.3)');
+  });
+}
+function signSprite(txt,accent){
+  const w=Math.round(txt.length*5.2+14), h=20;
+  return rasterize(w,h,(g)=>{
+    g.fillStyle='#12202b'; g.fillRect(0,0,w,h);
+    g.fillStyle=accent||'#7ddcff'; g.fillRect(0,0,w,2);
+    g.fillStyle='rgba(255,255,255,.06)'; g.fillRect(0,2,w,6);
+    g.fillStyle='#cfe6f2'; g.font='bold 8px monospace'; g.textAlign='center';
+    g.fillText(txt,w/2,14);
+  });
+}
+function markerSprite(rgb){
+  const [r,g_,b]=rgb;
+  const c=(a)=>`rgba(${r},${g_},${b},${a})`;
+  return rasterize(32,64,(g)=>{
+    // light column
+    const grd=g.createLinearGradient(0,64,0,0);
+    grd.addColorStop(0,c(.55)); grd.addColorStop(.5,c(.18)); grd.addColorStop(1,c(0));
+    g.fillStyle=grd; g.fillRect(13,0,6,64);
+    // landing ring on the floor
+    g.strokeStyle=c(.85); g.lineWidth=2;
+    g.beginPath(); g.ellipse(16,58,14,4.5,0,0,Math.PI*2); g.stroke();
+    g.strokeStyle=c(.35); g.lineWidth=1;
+    g.beginPath(); g.ellipse(16,58,9,3,0,0,Math.PI*2); g.stroke();
+    // drop chevrons
+    g.fillStyle=c(.92);
+    for(const [y,s] of [[28,9],[38,7]]){
+      g.beginPath(); g.moveTo(16,y+s); g.lineTo(16+s,y); g.lineTo(16+s-3,y);
+      g.lineTo(16,y+s-4); g.lineTo(16-s+3,y); g.lineTo(16-s,y); g.closePath(); g.fill();
+    }
+  });
+}
+
+let SPR = {};
+function buildSprites(){
+  SPR = {
+    people:{
+      nurse:  Array.from({length:5},()=>personSprite('nurse')),
+      doctor: Array.from({length:4},()=>personSprite('doctor')),
+      surgeon:Array.from({length:2},()=>personSprite('surgeon')),
+      patient:Array.from({length:4},()=>personSprite('patient')),
+      janitor:[personSprite('janitor')],
+      visitor:Array.from({length:6},()=>personSprite('visitor')),
+    },
+    wheelchair:[wheelchairSprite(),wheelchairSprite()],
+    gurney: gurneySprite(),
+    cart: cartSprite(),
+    iv: ivSprite(),
+    plant: plantSprite(),
+    chair: chairSprite(),
+    markerPick: markerSprite([125,220,255]),   // go collect the patient
+    markerDrop: markerSprite([120,235,160]),   // deliver them here
+    signs: {}
+  };
+}
+
+/* ==================================================================== MAP */
+const grid  = new Uint8Array(MW*MH);   // 0 = open, 1 = solid
+const wtex  = new Uint8Array(MW*MH);
+const ftex  = new Uint8Array(MW*MH);
+const ctex  = new Uint8Array(MW*MH);
+const walkable = new Uint8Array(MW*MH);
+const idx=(x,y)=>y*MW+x;
+const inb=(x,y)=>x>=0&&y>=0&&x<MW&&y<MH;
+const isWall=(x,y)=>!inb(x,y)||grid[idx(x,y)]!==0;
+
+let rooms=[];           // patient rooms — where a transfer starts
+let chairSpots=[];      // waiting-room seats
+let propList=[];        // static sprites
+let clearZones=[];      // doorways and bays that furniture must not pinch
+
+// where patients get taken. Positions are checked against walls/props on build.
+const DEPTS=[
+  {name:'Dialysis',         x:2.6,  y:10.5},
+  {name:'Physiotherapy',    x:49.2, y:11.5},
+  {name:'Pharmacy',         x:2.6,  y:26.5},
+  {name:'Pathology lab',    x:49.2, y:26.5},
+  {name:'Theatre lifts',    x:25.5, y:2.7 },
+  {name:'Emergency dept',   x:25.5, y:35.0},
+  {name:'CT scanner',       x:46.8, y:15.4},
+  {name:'Discharge lounge', x:10.0, y:18.6},
+];
+
+function carve(x0,y0,x1,y1,f,c){
+  for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){
+    if(!inb(x,y))continue;
+    grid[idx(x,y)]=0; ftex[idx(x,y)]=f; ctex[idx(x,y)]=c;
+  }
+}
+function wallRect(x0,y0,x1,y1,t){
+  for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){
+    if(!inb(x,y))continue; grid[idx(x,y)]=1; wtex[idx(x,y)]=t;
+  }
+}
+
+function buildMap(){
+  TEX.length = TEX_BASE;                     // drop the previous run's door textures
+  grid.fill(1); wtex.fill(TX_WALL); ftex.fill(FT_VINYL); ctex.fill(CT_TILE);
+  rooms=[]; chairSpots=[]; propList=[]; clearZones=[]; doorCells=new Set();
+
+  // corridors -------------------------------------------------------------
+  carve(1,9,50,12,FT_VINYL,CT_TILE);      // north corridor
+  carve(1,25,50,28,FT_VINYL,CT_TILE);     // south corridor
+  carve(24,1,27,36,FT_VINYL,CT_TILE);     // central spine
+
+  // ceiling lights + wayfinding stripes
+  for(let x=1;x<=50;x++){
+    ftex[idx(x,10)]=FT_GUIDE_A; ftex[idx(x,26)]=FT_GUIDE_B;
+    if(x%3===0){ ctex[idx(x,10)]=CT_LIGHT; ctex[idx(x,11)]=CT_LIGHT;
+                 ctex[idx(x,26)]=CT_LIGHT; ctex[idx(x,27)]=CT_LIGHT; }
+  }
+  for(let y=1;y<=36;y++){
+    ftex[idx(25,y)]=FT_GUIDE_AV; ftex[idx(26,y)]=FT_GUIDE_BV;
+    if(y%3===0){ ctex[idx(25,y)]=CT_LIGHT; ctex[idx(26,y)]=CT_LIGHT; }
+  }
+
+  // patient rooms ---------------------------------------------------------
+  const bands=[
+    {y0:1,y1:7,  doorY:8,  from:'south', floorNum:2},
+    {y0:30,y1:36,doorY:29, from:'north', floorNum:3},
+  ];
+  const xs=[[1,6],[8,13],[15,20],[28,33],[35,40],[42,47]];
+  let n=1;
+  for(const b of bands){
+    for(const [x0,x1] of xs){
+      carve(x0,b.y0,x1,b.y1,FT_ROOM,CT_TILE);
+      const cx=(x0+x1+1)/2, cy=(b.y0+b.y1+1)/2;
+      const num = b.floorNum*100 + n*2; n++;
+      const dx0=Math.round(cx)-1;
+      carve(dx0,b.doorY,dx0+1,b.doorY,FT_ROOM,CT_TILE);          // doorway
+      const dtex=TEX.push(texDoor(num,pick(['#8fb3c4','#a8bfa0','#c4b08f'])))-1;
+      if(inb(dx0-1,b.doorY)) wtex[idx(dx0-1,b.doorY)]=dtex;
+      if(inb(dx0+2,b.doorY)) wtex[idx(dx0+2,b.doorY)]=dtex;
+      rooms.push({num, x:cx, y:cy, doorX:dx0+1, doorY:b.doorY,
+                  wing: cx<24?'west wing':'east wing'});
+      clearZones.push({x:dx0+1, y:b.doorY+0.5, r:1.7});   // keep the doorway drivable
+      doorCells.add(idx(dx0,b.doorY)); doorCells.add(idx(dx0+1,b.doorY));
+      // beds + IV poles
+      propList.push({s:SPR.gurney, x:x0+1.6, y:b.y0+ (b.from==='south'?1.3:5.0), h:1.05, r:0.55});
+      propList.push({s:SPR.iv,     x:x0+0.7, y:b.y0+ (b.from==='south'?1.3:5.0), h:1.5,  r:0.28});
+      if(Math.random()<.6) propList.push({s:SPR.gurney, x:x1-0.6, y:b.y0+(b.from==='south'?4.6:1.6), h:1.05, r:0.55});
+      if(Math.random()<.5) propList.push({s:SPR.plant,  x:x0+0.6, y:b.y1-0.4, h:1.3, r:0.3});
+    }
+    n=1;
+  }
+  // closets at the far ends
+  carve(22,1,23,7,FT_ROOM,CT_TILE);   carve(22,8,23,8,FT_ROOM,CT_TILE);
+  carve(49,1,50,7,FT_ROOM,CT_TILE);   carve(49,8,50,8,FT_ROOM,CT_TILE);
+  carve(22,30,23,36,FT_ROOM,CT_TILE); carve(22,29,23,29,FT_ROOM,CT_TILE);
+  carve(49,30,50,36,FT_ROOM,CT_TILE); carve(49,29,50,29,FT_ROOM,CT_TILE);
+
+  // middle bands ----------------------------------------------------------
+  carve(1,14,22,23,FT_CARPET,CT_TILE);   // waiting lounge (west)
+  carve(29,14,50,23,FT_ROOM,CT_TILE);    // nurses' station / ward (east)
+  // openings onto the corridors
+  carve(5,13,7,13,FT_CARPET,CT_TILE);  carve(17,13,19,13,FT_CARPET,CT_TILE);
+  carve(5,24,7,24,FT_CARPET,CT_TILE);  carve(17,24,19,24,FT_CARPET,CT_TILE);
+  carve(32,13,34,13,FT_ROOM,CT_TILE);  carve(44,13,46,13,FT_ROOM,CT_TILE);
+  carve(32,24,34,24,FT_ROOM,CT_TILE);  carve(44,24,46,24,FT_ROOM,CT_TILE);
+  // doorways onto the spine — two cells wide, so a loaded trolley actually fits
+  carve(22,17,23,19,FT_CARPET,CT_TILE);
+  carve(28,17,29,19,FT_ROOM,CT_TILE);
+  for(let y=14;y<=23;y++){ if(y<17||y>19){ if(inb(23,y))wtex[idx(23,y)]=TX_TILE; if(inb(28,y))wtex[idx(28,y)]=TX_TILE; } }
+
+  // nurses' station counter (east middle)
+  wallRect(35,16,44,16,TX_COUNTER);
+  wallRect(35,17,35,20,TX_COUNTER);
+  wallRect(44,17,44,20,TX_COUNTER);
+  for(let x=36;x<=43;x++) for(let y=17;y<=20;y++){ ftex[idx(x,y)]=FT_VINYL; ctex[idx(x,y)]=CT_LIGHT; }
+  propList.push({s:SPR.cart, x:33.5, y:15.5, h:1.15, r:0.4});
+  propList.push({s:SPR.cart, x:47.5, y:21.5, h:1.15, r:0.4});
+  propList.push({s:SPR.plant,x:30.6, y:22.4, h:1.35, r:0.3});
+  propList.push({s:SPR.plant,x:49.4, y:14.6, h:1.35, r:0.3});
+  propList.push({s:SPR.gurney,x:31.0,y:19.0, h:1.05, r:0.55});
+
+  // waiting lounge seating (west middle) — banks of four with aisles you can wheel through
+  for(const row of [16.2, 21.0]){
+    for(const x0 of [3.4, 10.2, 17.0]){
+      for(let i=0;i<4;i++){
+        const x=x0+i*1.25;
+        propList.push({s:SPR.chair, x, y:row, h:0.95, r:0.28});
+        chairSpots.push({x, y: row + (row<18? 0.55 : -0.55)});
+      }
+    }
+  }
+  propList.push({s:SPR.plant,x:2.6,y:15.0,h:1.4,r:0.3});
+  propList.push({s:SPR.plant,x:2.6,y:22.6,h:1.4,r:0.3});
+  propList.push({s:SPR.plant,x:20.6,y:18.5,h:1.4,r:0.3});
+
+  // elevator bay at the north end of the spine + lobby dressing
+  wallRect(24,1,25,1,TX_ELEV); wallRect(26,1,27,1,TX_ELEV);
+  propList.push({s:SPR.plant,x:24.5,y:2.6,h:1.4,r:0.3});
+  propList.push({s:SPR.plant,x:27.5,y:2.6,h:1.4,r:0.3});
+  propList.push({s:SPR.cart, x:24.6,y:32.4,h:1.15,r:0.4});
+
+  // windows on the outer shell
+  for(let x=0;x<MW;x++){ if(x%3===1){ if(isWall(x,0))wtex[idx(x,0)]=TX_WIN; if(isWall(x,MH-1))wtex[idx(x,MH-1)]=TX_WIN; } }
+  for(let y=0;y<MH;y++){ if(y%3===1){ if(isWall(0,y))wtex[idx(0,y)]=TX_WIN; if(isWall(MW-1,y))wtex[idx(MW-1,y)]=TX_WIN; } }
+
+  // hanging wayfinding signs (decor only — no collision)
+  const sign=(txt,x,y)=>propList.push({s:signSprite(txt),x,y,h:0.5,base:1.75,r:0,ghost:true});
+  sign('ROOMS 202-212', 22.6, 10.6);  sign('ROOMS 202-212', 28.4, 11.4);
+  sign('ROOMS 302-312', 22.6, 26.6);  sign('ROOMS 302-312', 28.4, 27.4);
+  sign('NURSES STN',    30.5, 17.5);  sign('WAITING',       21.4, 18.5);
+
+  for(const [x0,y0,x1,y1] of [[5,13,7,13],[17,13,19,13],[5,24,7,24],[17,24,19,24],
+                              [32,13,34,13],[44,13,46,13],[32,24,34,24],[44,24,46,24],
+                              [22,17,23,19],[28,17,29,19]])
+    for(let y=y0;y<=y1;y++) for(let x=x0;x<=x1;x++) doorCells.add(idx(x,y));
+
+  // every gap between two areas is a pinch point — furniture gets moved out of them
+  for(const [x,y] of [[6,13.5],[18,13.5],[6,24.5],[18,24.5],[33,13.5],[45,13.5],[33,24.5],[45,24.5],
+                      [23.5,18],[28.5,18],[25.5,8.5],[25.5,29]])
+    clearZones.push({x,y,r:2.0});
+  for(const d of DEPTS) clearZones.push({x:d.x, y:d.y, r:1.4});
+
+  propList = propList.filter(p=>{
+    if(p.ghost) return true;
+    for(const z of clearZones){
+      let dx=p.x-z.x, dy=p.y-z.y, d=Math.hypot(dx,dy);
+      if(d >= z.r+p.r) continue;
+      if(d<1e-3){ dx=1; dy=0; d=1; }
+      const push=(z.r+p.r-d)+0.05;                     // shove it aside…
+      const nx=p.x+dx/d*push, ny=p.y+dy/d*push;
+      if(isWall(Math.floor(nx),Math.floor(ny)) || clearZones.some(o=>Math.hypot(nx-o.x,ny-o.y)<o.r+p.r))
+        return false;                                  // …or skip it entirely
+      p.x=nx; p.y=ny;
+    }
+    return true;
+  });
+
+  // Furniture blocks people too: cells a prop sits in are off the pathfinding graph,
+  // so staff route around the seating banks and parked beds instead of wedging into them.
+  for(let i=0;i<MW*MH;i++) walkable[i] = grid[i]===0 ? 1 : 0;
+  for(const p of propList){
+    if(p.ghost) continue;
+    const reach=p.r+0.42;
+    for(let cy=Math.floor(p.y-reach); cy<=Math.floor(p.y+reach); cy++)
+      for(let cx=Math.floor(p.x-reach); cx<=Math.floor(p.x+reach); cx++){
+        if(!inb(cx,cy)) continue;
+        if(Math.hypot(cx+0.5-p.x, cy+0.5-p.y) < reach) walkable[idx(cx,cy)]=0;
+      }
+  }
+
+  // department bays: nudge each one clear of walls and furniture, then sign it
+  for(const d of DEPTS){
+    if(blocked(d.x,d.y,0.5)){
+      outer:
+      for(let rad=1;rad<=6;rad++){
+        for(let a=0;a<16;a++){
+          const nx=d.x+Math.cos(a*0.3927)*rad*0.6, ny=d.y+Math.sin(a*0.3927)*rad*0.6;
+          if(!blocked(nx,ny,0.5)){ d.x=nx; d.y=ny; break outer; }
+        }
+      }
+    }
+    propList.push({s:signSprite(d.name.toUpperCase(),'#78ebA0'), x:d.x, y:d.y, h:0.42, base:1.72, r:0, ghost:true});
+  }
+}
+
+/* =============================================================== PATHFINDING */
+const bfsPrev = new Int32Array(MW*MH);
+const bfsSeen = new Int32Array(MW*MH);
+let bfsStamp=0;
+const queue = new Int32Array(MW*MH);
+
+function findPath(sx,sy,tx,ty){
+  const s=idx(sx,sy), t=idx(tx,ty);
+  // the start may sit in a furniture shadow (beside a bed, in a seating bank);
+  // seed it anyway so anyone standing there can still find a way out
+  if(!walkable[t]) return null;
+  if(s===t) return [];
+  bfsStamp++;
+  let head=0,tail=0;
+  queue[tail++]=s; bfsSeen[s]=bfsStamp; bfsPrev[s]=-1;
+  while(head<tail){
+    const cur=queue[head++];
+    if(cur===t){
+      const path=[]; let c=t;
+      while(c!==-1){ path.push({x:(c%MW)+0.5, y:((c/MW)|0)+0.5}); c=bfsPrev[c]; }
+      path.pop(); path.reverse(); return path;
+    }
+    const cx=cur%MW, cy=(cur/MW)|0;
+    for(let k=0;k<4;k++){
+      const nx=cx+(k===0?1:k===1?-1:0), ny=cy+(k===2?1:k===3?-1:0);
+      if(nx<0||ny<0||nx>=MW||ny>=MH) continue;
+      const ni=idx(nx,ny);
+      if(!walkable[ni]||bfsSeen[ni]===bfsStamp) continue;
+      bfsSeen[ni]=bfsStamp; bfsPrev[ni]=cur; queue[tail++]=ni;
+    }
+  }
+  return null;
+}
+function randomOpenCell(){
+  for(let i=0;i<500;i++){
+    const x=rint(1,MW-2), y=rint(1,MH-2);
+    if(walkable[idx(x,y)] && !circleHitsProp(x+0.5,y+0.5,0.45)) return {x,y};
+  }
+  return {x:25,y:10};
+}
+
+/* ================================================================= COLLISION */
+function circleHitsWall(x,y,r){
+  const x0=Math.floor(x-r),x1=Math.floor(x+r),y0=Math.floor(y-r),y1=Math.floor(y+r);
+  for(let cy=y0;cy<=y1;cy++)for(let cx=x0;cx<=x1;cx++){
+    if(!isWall(cx,cy)) continue;
+    const px=clamp(x,cx,cx+1), py=clamp(y,cy,cy+1);
+    const dx=x-px, dy=y-py;
+    if(dx*dx+dy*dy < r*r) return true;
+  }
+  return false;
+}
+function circleHitsProp(x,y,r){
+  for(const p of propList){
+    if(p.ghost) continue;
+    const dx=x-p.x, dy=y-p.y, rr=r+p.r;
+    if(dx*dx+dy*dy < rr*rr) return true;
+  }
+  return false;
+}
+function blocked(x,y,r){ return circleHitsWall(x,y,r)||circleHitsProp(x,y,r); }
+
+function slideMove(ent,dx,dy,r){
+  if(!blocked(ent.x+dx, ent.y, r)) ent.x+=dx;
+  if(!blocked(ent.x, ent.y+dy, r)) ent.y+=dy;
+}
+
+/* Sum of the pushes needed to leave every wall and prop the circle is touching.
+   Used to work a wedged robot back out of a doorframe corner. */
+function escapeVector(x,y,r){
+  let px=0, py=0;
+  for(let cy=Math.floor(y-r-1); cy<=Math.floor(y+r+1); cy++)
+    for(let cx=Math.floor(x-r-1); cx<=Math.floor(x+r+1); cx++){
+      if(!isWall(cx,cy)) continue;
+      const nx=clamp(x,cx,cx+1), ny=clamp(y,cy,cy+1);
+      const dx=x-nx, dy=y-ny, d=Math.hypot(dx,dy);
+      if(d<r+0.06 && d>1e-4){ const w=r+0.06-d; px+=dx/d*w; py+=dy/d*w; }
+    }
+  for(const p of propList){
+    if(p.ghost) continue;
+    const dx=x-p.x, dy=y-p.y, d=Math.hypot(dx,dy), rr=r+p.r+0.06;
+    if(d<rr && d>1e-4){ const w=rr-d; px+=dx/d*w; py+=dy/d*w; }
+  }
+  return [px,py];
+}
+
+/* ==================================================================== GAME */
+/* Time economy: a median job is ~30s out to the room plus ~40s wheeling the
+   patient across the ward, so a transfer has to pay for roughly 75 seconds. */
+/* Everything moves at double the old pace, so a median job is ~40s of driving
+   rather than ~80s — the shift clock and the payouts are halved to match. */
+const DIFFS={
+  quiet:{label:'Night shift', people:14, speed:0.85, time:95, add:58, pickup:18, spawn:1},
+  day  :{label:'Day shift',   people:24, speed:1.00, time:78, add:50, pickup:16, spawn:2},
+  chaos:{label:'Code chaos',  people:34, speed:1.20, time:62, add:43, pickup:14, spawn:3},
+};
+let difficulty='day';
+
+const player={x:25.5,y:34.0,ang:-Math.PI/2, vx:0, vy:0, speed:0, bob:0, stun:0, shake:0};
+let humans=[], marker=null, goal=null, task=null;
+let state='menu';            // menu | play | pause | over
+let time=0, elapsed=0, transfers=0, collisions=0, nearMisses=0, careTotal=0;
+let dwell=0, chirpCd=0, beepCd=0, topView=false, joltCd=0;
+let nearestDist=99;
+let patientSay='', patientSayT=0;
+
+const PT_NAMES=['Mrs Okafor','Mr Alvarez','Ms Petrova','Mr Bianchi','Mrs Haddad','Mr Nakamura',
+                'Ms Lindqvist','Mr Osei','Mrs Duarte','Mr Whitfield','Ms Farrell','Mr Adeyemi'];
+const PT_COND =['hip fracture','post-op observation','chest pain','pre-op check','fractured wrist',
+                'dizzy spells','routine scan','stitches out','kidney workup','breathing trouble'];
+
+const KINDS=['nurse','nurse','doctor','patient','visitor','visitor','surgeon','janitor'];
+
+function makeHuman(cell, opts={}){
+  const kind = opts.kind || pick(KINDS);
+  const wheel = !opts.kind && kind==='patient' && Math.random()<0.25;
+  const spr = wheel ? pick(SPR.wheelchair) : pick(SPR.people[kind]);
+  const h = {
+    kind, x:cell.x+0.5, y:cell.y+0.5, spr,
+    hgt: wheel?1.15:1.46, rad: wheel?0.36:R_HUMAN,
+    base: (kind==='janitor'?1.44:kind==='patient'?1.24:kind==='doctor'?1.84:1.76) * DIFFS[difficulty].speed,
+    speed:0, path:null, pi:0, wait:0, dirx:0, diry:0,
+    state: opts.state || 'walk', chair:null, hitCd:0, missCd:0,
+    say:'', sayT:0, stuck:0, lastx:0, lasty:0, bob:Math.random()*6.28, urgent:false
+  };
+  if(h.state==='sit' && opts.chair){ h.x=opts.chair.x; h.y=opts.chair.y; h.chair=opts.chair; h.wait=rnd(8,40); }
+  return h;
+}
+
+function spawnCrowd(n){
+  for(let i=0;i<n;i++){
+    if(chairSpots.length && Math.random()<0.22){
+      const c=pick(chairSpots);
+      if(!humans.some(h=>h.chair===c)){ humans.push(makeHuman({x:0,y:0},{state:'sit',chair:c})); continue; }
+    }
+    let cell=randomOpenCell(), tries=0;
+    while(tries++<40 && Math.hypot(cell.x+0.5-player.x, cell.y+0.5-player.y) < 6) cell=randomOpenCell();
+    humans.push(makeHuman(cell));
+  }
+}
+
+/* --- the porter's job: collect a patient from a room, wheel them to a department --- */
+function newTask(){
+  const opts = rooms.filter(r=>!task || r.num!==task.room.num);
+  // prefer a room that isn't right under the robot's nose
+  opts.sort((a,b)=> Math.hypot(b.x-player.x,b.y-player.y) - Math.hypot(a.x-player.x,a.y-player.y));
+  const room = pick(opts.slice(0, Math.max(4,(opts.length/2)|0)));
+  // sample a few departments and favour the nearer ones, so no single job is a marathon
+  const pool = DEPTS.filter(d=>!task || d.name!==task.dept.name);
+  const sample=[]; while(sample.length<3 && sample.length<pool.length){
+    const d=pick(pool); if(!sample.includes(d)) sample.push(d);
+  }
+  sample.sort((a,b)=>Math.hypot(a.x-room.x,a.y-room.y)-Math.hypot(b.x-room.x,b.y-room.y));
+  const dept = sample[Math.random()<0.6 ? 0 : 1] || sample[0];
+  const mobility = Math.random()<0.5 ? 'chair' : 'trolley';
+
+  task = {phase:'pickup', room, dept, mobility, comfort:100,
+          name:pick(PT_NAMES), cond:pick(PT_COND), patient:null,
+          skin:pick(SKIN), hair:pick(HAIR)};
+
+  // the patient is waiting in the room — a real obstacle you have to pull up beside
+  const p = makeHuman({x:Math.floor(room.x), y:Math.floor(room.y)}, {kind:'patient'});
+  p.isFare=true; p.state='wait'; p.wait=1e9;
+  if(mobility==='chair'){ p.spr=pick(SPR.wheelchair); p.hgt=1.15; p.rad=0.36; }
+  for(const [ox,oy] of [[0.9,0],[-0.9,0],[0,0.9],[0,-0.9],[0.9,0.9],[-0.9,-0.9],[0,0]]){
+    p.x=room.x+ox; p.y=room.y+oy;
+    if(!blocked(p.x,p.y,p.rad)) break;
+  }
+  humans.push(p); task.patient=p;
+  setTarget(room.x, room.y, 'Room '+room.num, SPR.markerPick);
+  taskCard();
+}
+function setTarget(x,y,label,spr){
+  goal={x,y,label};
+  marker={x,y,spr};
+}
+function carrying(){ return task && task.phase==='drop'; }
+// how much space the robot takes up as far as people are concerned
+function playerRadius(){
+  return carrying() ? (task.mobility==='trolley' ? 0.48 : 0.42) : R_ROBOT;
+}
+
+function taskCard(){
+  const g=id=>document.getElementById(id);
+  if(task.phase==='pickup'){
+    g('phase').textContent='Collect patient from';
+    g('dest').textContent='Room '+task.room.num;
+    g('destsub').textContent=task.name+' · '+task.cond;
+    g('destsub2').textContent='→ '+task.dept.name+'  ('+(task.mobility==='chair'?'wheelchair':'trolley')+')';
+  } else {
+    g('phase').textContent='Transport '+task.name+' to';
+    g('dest').textContent=task.dept.name;
+    g('destsub').textContent=task.cond+' · '+(task.mobility==='chair'?'wheelchair':'trolley');
+    g('destsub2').textContent='from Room '+task.room.num;
+  }
+}
+function patientSays(msg,secs){ patientSay=msg; patientSayT=secs||2.4; }
+
+function resetGame(){
+  buildMap();
+  humans=[]; transfers=0; collisions=0; nearMisses=0; elapsed=0; careTotal=0;
+  dwell=0; patientSay=''; patientSayT=0; joltCd=0;
+  time=DIFFS[difficulty].time;
+  player.x=25.5; player.y=34.5; player.ang=-Math.PI/2; player.vx=player.vy=0; player.stun=0; player.shake=0;
+  // never start the shift wedged inside a wall or a parked cart
+  for(let i=0;i<40 && blocked(player.x,player.y,R_ROBOT);i++) player.y-=0.25;
+  task=null; TEL.reset(); newTask(); TEL.legStart();
+  spawnCrowd(DIFFS[difficulty].people);
+  toastClear();
+  toast('Porter run: collect '+task.name+' from Room '+task.room.num+'.','good');
+}
+
+/* ==================================================== SHIFT DATA CAPTURE ====
+   Everything a real service robot would be logging on a deployment: proxemics,
+   clearance distributions, time-to-collision events, ride quality, recoveries.
+   Values here are simulated — the schema and the metric definitions are not. */
+
+function hasLOS(x0,y0,x1,y1){
+  const dx=x1-x0, dy=y1-y0, n=Math.ceil(Math.hypot(dx,dy)/0.3);
+  for(let i=1;i<n;i++){
+    const t=i/n;
+    if(isWall(Math.floor(x0+dx*t), Math.floor(y0+dy*t))) return false;
+  }
+  return true;
+}
+
+const TEL={
+  reset(){
+    this.t=0; this.movingT=0; this.dist=0;
+    this.zone={intimate:0, personal:0, social:0, clear:0};   // seconds by proxemic band
+    this.minClear=Infinity; this.encounters=[];              // per-encounter closest approach (m)
+    this.ttc=0; this.jolts=0; this.recoveries=0; this.doorways=0;
+    this.chirps=0; this.yields=0; this.chirpTargets=0;
+    this.latPeak=0; this.latSq=0; this.latN=0; this.latS=0;
+    this.idealM=0; this.actualM=0; this.legs=0;
+    this.legIdeal=0; this.legActual=0;
+    this.densSum=0; this.densN=0;
+    this.bySpeedDens=[[0,0],[0,0],[0,0],[0,0]];              // [sum, n] for 0 / 1-2 / 3-4 / 5+ nearby
+    this.comforts=[]; this.surprises=0;
+    this.track=[]; this.trackT=0;
+    this.pvx=0; this.pvy=0; this.lastDoorCell=-1; this.recoveryCd=0;
+    this.wedgeWas=0;
+  },
+  legStart(){
+    const p=findPath(Math.floor(player.x),Math.floor(player.y),Math.floor(goal.x),Math.floor(goal.y));
+    this.legIdeal = (p?p.length:Math.hypot(goal.x-player.x,goal.y-player.y))*M_PER_CELL;
+    this.legActual = 0;
+  },
+  legEnd(){
+    if(this.legIdeal>0.5){ this.idealM+=this.legIdeal; this.actualM+=this.legActual; this.legs++; }
+    this.legIdeal=0; this.legActual=0;
+  },
+  chirp(targets, yielded){ this.chirps++; this.chirpTargets+=targets; this.yields+=yielded; },
+  jolt(){ this.jolts++; },
+
+  sample(dt){
+    this.t+=dt;
+    const spdM = player.speed*M_PER_CELL;                    // m/s
+    const step = spdM*dt;
+    this.dist += step; this.legActual += step;
+    if(spdM>0.15) this.movingT+=dt;
+
+    // proxemic exposure + closest approach, per Hall's zones
+    let near=Infinity, dens=0;
+    for(const h of humans){
+      if(h.isFare) continue;
+      const d=Math.hypot(h.x-player.x, h.y-player.y)*M_PER_CELL;
+      if(d<near) near=d;
+      if(d<3.0) dens++;
+      // encounter bookkeeping: track the closest approach of each pass
+      if(d<2.5){ h._enc = Math.min(h._enc===undefined?99:h._enc, d); }
+      else if(h._enc!==undefined){ this.encounters.push(h._enc); h._enc=undefined; }
+      // did they appear from behind a corner, already close?
+      const los = d<6.0 ? hasLOS(player.x,player.y,h.x,h.y) : false;
+      if(los && !h._los && d<3.0) this.surprises++;
+      h._los=los;
+      // closing time-to-collision under 1.5 s
+      if(d<4.0){
+        const rx=(h.x-player.x)*M_PER_CELL, ry=(h.y-player.y)*M_PER_CELL;
+        const vx=(player.vx-h.dirx)*M_PER_CELL, vy=(player.vy-h.diry)*M_PER_CELL;
+        const vv=vx*vx+vy*vy, closing=-(rx*vx+ry*vy);
+        if(vv>0.04 && closing>0){
+          const tt=closing/vv;
+          if(tt<1.5 && (h._ttcCd||0)<=0){ this.ttc++; h._ttcCd=2.0; }
+        }
+      }
+      if(h._ttcCd>0) h._ttcCd-=dt;
+    }
+    if(near<this.minClear) this.minClear=near;
+    if(near<0.45) this.zone.intimate+=dt;
+    else if(near<1.2) this.zone.personal+=dt;
+    else if(near<3.6) this.zone.social+=dt;
+    else this.zone.clear+=dt;
+
+    // crowd density and the speed the robot actually chose in it
+    this.densSum+=dens; this.densN++;
+    const b = dens===0?0 : dens<=2?1 : dens<=4?2 : 3;
+    this.bySpeedDens[b][0]+=spdM; this.bySpeedDens[b][1]++;
+
+    // lateral acceleration felt by the payload (ride quality)
+    const ax=(player.vx-this.pvx)/dt*M_PER_CELL, ay=(player.vy-this.pvy)/dt*M_PER_CELL;
+    const hx=Math.cos(player.ang), hy=Math.sin(player.ang);
+    const lat=Math.abs(ax*(-hy)+ay*hx);
+    // an accelerometer integrates over a window; single-frame spikes are not what a
+    // passenger feels, so smooth with a 0.15 s time constant before recording
+    if(isFinite(lat)) this.latS += (lat-this.latS)*Math.min(1, dt/0.15);
+    if(carrying()){
+      if(this.latS>this.latPeak) this.latPeak=this.latS;
+      this.latSq+=this.latS*this.latS; this.latN++;
+    }
+    this.pvx=player.vx; this.pvy=player.vy;
+
+    // doorway traversals + recovery manoeuvres
+    const cell=idx(Math.floor(player.x),Math.floor(player.y));
+    if(doorCells.has(cell) && cell!==this.lastDoorCell){ this.doorways++; this.lastDoorCell=cell; }
+    else if(!doorCells.has(cell)) this.lastDoorCell=-1;
+    if(this.recoveryCd>0) this.recoveryCd-=dt;
+    if((player.wedge||0)>0.25 && this.wedgeWas<=0.25 && this.recoveryCd<=0){
+      this.recoveries++; this.recoveryCd=1.5;      // one episode, not one frame
+    }
+    this.wedgeWas=player.wedge||0;
+
+    // 5 Hz trajectory log — the artifact you would actually replay offline
+    this.trackT+=dt;
+    if(this.trackT>=0.2 && this.track.length<4000){
+      this.trackT=0;
+      this.track.push([+this.t.toFixed(2), +(player.x*M_PER_CELL).toFixed(2), +(player.y*M_PER_CELL).toFixed(2),
+                       +player.ang.toFixed(3), +spdM.toFixed(2),
+                       near===Infinity?null:+near.toFixed(2), dens, carrying()?1:0,
+                       carrying()?Math.round(task.comfort):null]);
+    }
+  },
+
+  report(){
+    const per100=(n)=>this.dist>1 ? +(n/this.dist*100).toFixed(2) : 0;
+    const enc=this.encounters.slice().sort((a,b)=>a-b);
+    const q=(a,f)=>a.length? +a[Math.min(a.length-1,Math.floor(a.length*f))].toFixed(2) : null;
+    const dens=this.bySpeedDens.map(([s,n])=>n? +(s/n).toFixed(2) : null);
+    return {
+      schema:'ward-runner.shift.v1', simulated:true,
+      difficulty:DIFFS[difficulty].label,
+      duration_s:+this.t.toFixed(1), distance_m:+this.dist.toFixed(1),
+      transfers, collisions, near_misses:nearMisses,
+      collisions_per_100m: per100(collisions),
+      near_misses_per_100m: per100(nearMisses),
+      ttc_under_1s5_per_100m: per100(this.ttc),
+      min_clearance_m: this.minClear===Infinity?null:+this.minClear.toFixed(2),
+      encounter_clearance_p05_m: q(enc,0.05), encounter_clearance_median_m: q(enc,0.5),
+      encounters: enc.length,
+      proxemic_seconds: {intimate_lt_045m:+this.zone.intimate.toFixed(1),
+                         personal_045_12m:+this.zone.personal.toFixed(1),
+                         social_12_36m:+this.zone.social.toFixed(1),
+                         clear_gt_36m:+this.zone.clear.toFixed(1)},
+      personal_space_time_pct: this.t>0 ? +(((this.zone.intimate+this.zone.personal)/this.t)*100).toFixed(1) : 0,
+      blind_corner_appearances: this.surprises,
+      intent_signals: {issued:this.chirps, people_in_range:this.chirpTargets, yielded:this.yields,
+                       yield_rate: this.chirpTargets? +(this.yields/this.chirpTargets).toFixed(2) : null},
+      ride_quality: {peak_lateral_accel_ms2:+this.latPeak.toFixed(2), accel_window_s:0.15,
+                     rms_lateral_accel_ms2: this.latN? +Math.sqrt(this.latSq/this.latN).toFixed(2):0,
+                     obstruction_jolts:this.jolts,
+                     comfort_scores:this.comforts,
+                     mean_comfort_pct: this.comforts.length?
+                       Math.round(this.comforts.reduce((s,v)=>s+v,0)/this.comforts.length):null},
+      navigation: {path_efficiency: this.actualM>0? +(this.idealM/this.actualM).toFixed(2):null,
+                   legs_completed:this.legs, doorway_traversals:this.doorways,
+                   recovery_manoeuvres:this.recoveries,
+                   mean_crowd_density_within_3m: this.densN? +(this.densSum/this.densN).toFixed(2):0,
+                   mean_speed_by_density_ms:{none:dens[0], light:dens[1], moderate:dens[2], heavy:dens[3]}},
+      trajectory_5hz_schema:['t_s','x_m','y_m','heading_rad','speed_ms','nearest_human_m',
+                             'people_within_3m','carrying','comfort_pct'],
+      trajectory_5hz:this.track
+    };
+  }
+};
+let doorCells=new Set();
+
+/* ------------------------------------------------------------------ toasts */
+const toastBox=document.getElementById('toasts');
+function toast(msg,cls){
+  const d=document.createElement('div');
+  d.className='toast'+(cls?' '+cls:''); d.textContent=msg;
+  toastBox.appendChild(d);
+  setTimeout(()=>{d.style.transition='opacity .3s';d.style.opacity='0';setTimeout(()=>d.remove(),320);},2100);
+  while(toastBox.children.length>4) toastBox.firstChild.remove();
+}
+function toastClear(){ toastBox.innerHTML=''; }
+
+/* ------------------------------------------------------------------- audio */
+let actx=null;
+function audio(){ if(!actx){ try{ actx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} } return actx; }
+function tone(f,dur,type,gain,slideTo){
+  const a=audio(); if(!a) return;
+  const o=a.createOscillator(), g=a.createGain();
+  o.type=type||'square'; o.frequency.setValueAtTime(f,a.currentTime);
+  if(slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, a.currentTime+dur);
+  g.gain.setValueAtTime(0.0001,a.currentTime);
+  g.gain.exponentialRampToValueAtTime(gain||0.06, a.currentTime+0.008);
+  g.gain.exponentialRampToValueAtTime(0.0001, a.currentTime+dur);
+  o.connect(g); g.connect(a.destination); o.start(); o.stop(a.currentTime+dur+0.02);
+}
+function sfxBeep(p){ tone(760+p*420, .05,'square',.035); }
+function sfxChirp(){ tone(520,.10,'square',.05,980); setTimeout(()=>tone(720,.10,'square',.045,1180),70); }
+function sfxHit(){ tone(150,.22,'sawtooth',.10,60);
+  const a=audio(); if(!a)return;
+  const b=a.createBuffer(1, a.sampleRate*0.18, a.sampleRate), d=b.getChannelData(0);
+  for(let i=0;i<d.length;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/d.length,3)*0.5;
+  const s=a.createBufferSource(), g=a.createGain(); g.gain.value=0.25;
+  s.buffer=b; s.connect(g); g.connect(a.destination); s.start();
+}
+function sfxDeliver(){ [660,880,1180].forEach((f,i)=>setTimeout(()=>tone(f,.12,'triangle',.06),i*90)); }
+function sfxEnd(){ [440,330,247].forEach((f,i)=>setTimeout(()=>tone(f,.30,'triangle',.07),i*180)); }
+
+/* ------------------------------------------------------------------- input */
+const keys={};
+let mouseDX=0;
+addEventListener('keydown',e=>{
+  if(e.repeat){ if(!['Tab'].includes(e.code)) return; }
+  keys[e.code]=true;
+  if(e.code==='Tab'){ e.preventDefault(); topView=true; }
+  if(e.code==='Escape' && state==='play'){ pauseGame(); }
+  if((e.code==='Space'||e.code==='KeyE') && state==='play'){ e.preventDefault(); chirp(); }
+  if(e.code==='KeyR' && (state==='play'||state==='over')){ resetGame(); state='play'; overlay.classList.add('hidden'); }
+});
+addEventListener('keyup',e=>{ keys[e.code]=false; if(e.code==='Tab'){ e.preventDefault(); topView=false; } });
+addEventListener('blur',()=>{ for(const k in keys) keys[k]=false; if(state==='play') pauseGame(); });
+
+let hadLock=false, dragging=false;
+function grabMouse(){
+  const p = scene.requestPointerLock && scene.requestPointerLock();
+  if(p && p.catch) p.catch(()=>{});           // pointer lock unavailable → drag-to-look fallback
+}
+scene.addEventListener('click',()=>{ if(state==='play' && !document.pointerLockElement) grabMouse(); });
+document.addEventListener('pointerlockchange',()=>{
+  if(document.pointerLockElement===scene){ hadLock=true; }
+  else if(hadLock && state==='play'){ hadLock=false; pauseGame(); }
+});
+scene.addEventListener('mousedown',()=>{ if(!document.pointerLockElement) dragging=true; });
+addEventListener('mouseup',()=>{ dragging=false; });
+document.addEventListener('mousemove',e=>{
+  if(document.pointerLockElement===scene) mouseDX+=e.movementX;
+  else if(dragging && state==='play') mouseDX+=e.movementX*1.6;
+});
+
+function chirp(){
+  if(chirpCd>0) return;
+  chirpCd=1.8; sfxChirp();
+  const dirx=Math.cos(player.ang), diry=Math.sin(player.ang);
+  let moved=0, inRange=0;
+  for(const h of humans){
+    if(h.isFare) continue;
+    const dx=h.x-player.x, dy=h.y-player.y, d=Math.hypot(dx,dy);
+    if(d<4.5){
+      inRange++;
+      const dot=(dx*dirx+dy*diry)/(d||1);
+      if(dot>0.1 || d<1.6){
+        h.yield=1.6; h.wait=0;
+        if(h.state==='sit'){ continue; }
+        moved++;
+        if(Math.random()<0.35){ h.say=pick(['oh — sorry!','go ahead','little robot!','after you']); h.sayT=1.8; }
+      }
+    }
+  }
+  TEL.chirp(inRange, moved);
+  if(moved) toast('“Excuse me, coming through.” — '+moved+' yielded','warn');
+}
+
+/* -------------------------------------------------------------- game logic */
+function updatePlayer(dt){
+  const carry = carrying();
+  const heavy = carry && task.mobility==='trolley';
+  // look — a loaded trolley swings wide, so turning is slower
+  const turnScale = carry ? (heavy?0.62:0.78) : 1;
+  const angBefore = player.ang;
+  if(mouseDX){ player.ang += mouseDX*0.0022*turnScale; mouseDX=0; }
+  const turn = (keys.ArrowLeft?-1:0)+(keys.ArrowRight?1:0);
+  player.ang += turn*3.1*turnScale*dt;
+
+  const sprint = keys.ShiftLeft||keys.ShiftRight;
+  let fwd = (keys.KeyW||keys.ArrowUp?1:0) - (keys.KeyS||keys.ArrowDown?1:0);
+  let str = (keys.KeyD?1:0) - (keys.KeyA?1:0);
+  if(player.stun>0){ fwd*=0.15; str*=0.15; }
+
+  const loadScale = carry ? (heavy?0.78:0.86) : 1;
+  const maxSpd = (sprint?5.10:3.10) * loadScale / M_PER_CELL;   // cells/s
+  const dirx=Math.cos(player.ang), diry=Math.sin(player.ang);
+  const tx = (dirx*fwd - diry*str), ty = (diry*fwd + dirx*str);
+  const tl = Math.hypot(tx,ty)||1;
+  const desireX = (fwd||str) ? tx/tl*maxSpd : 0;
+  const desireY = (fwd||str) ? ty/tl*maxSpd : 0;
+  const accel = ((fwd||str) ? 7.5 : 9.5) * (carry ? (heavy?0.55:0.7) : 1);
+  player.vx = lerp(player.vx, desireX, clamp(accel*dt,0,1));
+  player.vy = lerp(player.vy, desireY, clamp(accel*dt,0,1));
+
+  const bx=player.x, by=player.y;
+  // Geometry stays forgiving when loaded — the trolley's bulk is felt against people
+  // (see playerRadius) rather than by snagging every doorframe.
+  const rad = carry ? 0.36 : R_ROBOT;
+  slideMove(player, player.vx*dt, player.vy*dt, rad);
+
+  // caught on a doorframe corner? ease back out instead of grinding there forever
+  const wanted=Math.hypot(player.vx*dt, player.vy*dt);
+  const got=Math.hypot(player.x-bx, player.y-by);
+  player.wedge = (wanted>0.006 && got<wanted*0.25) ? (player.wedge||0)+dt : 0;
+  if(player.wedge>0.25){
+    const [ex,ey]=escapeVector(player.x, player.y, rad);
+    const el=Math.hypot(ex,ey);
+    if(el>1e-4){
+      const s=Math.min(1.6*dt, 0.06)/el;
+      if(!blocked(player.x+ex*s, player.y, rad)) player.x+=ex*s;
+      if(!blocked(player.x, player.y+ey*s, rad)) player.y+=ey*s;
+    }
+  }
+  player.speed = Math.hypot(player.vx,player.vy);
+  player.bob += player.speed*dt*4.0;
+
+  // scraping the trolley along a doorframe is its own kind of failure
+  if(joltCd>0) joltCd-=dt;
+  if(carry && joltCd<=0){
+    if(wanted>0.012 && got < wanted*0.45){
+      joltCd=1.2; TEL.jolt(); comfortHit(7, pick(['ooh — the wall','mind the doorframe','careful, careful']));
+      player.shake=Math.max(player.shake,0.5); tone(90,.14,'sawtooth',.05);
+    }
+  }
+  // rough handling: speed and hard cornering unsettle the patient
+  if(carry){
+    const spin=Math.abs(Math.atan2(Math.sin(player.ang-angBefore),Math.cos(player.ang-angBefore)))/Math.max(dt,1e-3);
+    let drain=0;
+    if(sprint && player.speed>0.6) drain += 3.2;
+    if(spin>2.6) drain += (spin-2.6)*2.0;
+    if(drain) task.comfort=Math.max(0, task.comfort-drain*dt);
+    else if(player.speed<0.95) task.comfort=Math.min(100, task.comfort+1.6*dt);
+    if(task.comfort<35 && Math.random()<dt*0.20) patientSays(pick(['please, slower','I feel queasy','not so fast']));
+  }
+
+  if(player.stun>0) player.stun-=dt;
+  if(player.shake>0) player.shake=Math.max(0,player.shake-dt*2.4);
+  if(chirpCd>0) chirpCd-=dt;
+  if(patientSayT>0) patientSayT-=dt;
+}
+
+function comfortHit(amount,msg){
+  if(!carrying()) return;
+  task.comfort=Math.max(0, task.comfort-amount);
+  if(msg) patientSays(msg);
+}
+
+function humanTarget(h){
+  const c=randomOpenCell();
+  const p=findPath(Math.floor(h.x),Math.floor(h.y),c.x,c.y);
+  if(p&&p.length){ h.path=p; h.pi=0; } else { h.path=null; h.wait=rnd(.5,2); }
+}
+
+function updateHumans(dt){
+  nearestDist=99;
+  for(const h of humans){
+    h.bob += dt*7;
+    if(h.sayT>0) h.sayT-=dt;
+    if(h.hitCd>0) h.hitCd-=dt;
+    if(h.missCd>0) h.missCd-=dt;
+    if(h.yield>0) h.yield-=dt;
+
+    let mvx=0, mvy=0;
+
+    if(h.isFare){                       // the patient you've been sent to collect: waits, never budges
+      h.speed=0;
+      if(!h.greeted && Math.hypot(h.x-player.x,h.y-player.y)<3.2){
+        h.greeted=true; h.say=pick(['about time!','over here','ready when you are','hello there']); h.sayT=2.6;
+      }
+      continue;
+    }
+
+    if(h.state==='sit'){
+      h.wait-=dt;
+      if(h.wait<=0){ h.state='walk'; h.chair=null; h.wait=0; }
+    } else {
+      if(h.wait>0){ h.wait-=dt; }
+      else{
+        if(!h.path || h.pi>=h.path.length) humanTarget(h);
+        if(h.path && h.pi<h.path.length){
+          const wp=h.path[h.pi];
+          const dx=wp.x-h.x, dy=wp.y-h.y, d=Math.hypot(dx,dy);
+          if(d<0.28){ h.pi++; }
+          else { mvx=dx/d; mvy=dy/d; }
+        }
+      }
+    }
+
+    // local avoidance: other humans
+    for(const o of humans){
+      if(o===h) continue;
+      const dx=h.x-o.x, dy=h.y-o.y, d2=dx*dx+dy*dy;
+      if(d2<1.44 && d2>0.0001){
+        const d=Math.sqrt(d2), w=(1.2-d)/1.2;
+        mvx += dx/d*w*1.1; mvy += dy/d*w*1.1;
+      }
+    }
+    // avoid the robot (they notice it a bit late — that's the game)
+    const pdx=h.x-player.x, pdy=h.y-player.y, pd=Math.hypot(pdx,pdy);
+    if(pd<nearestDist) nearestDist=pd;
+    const notice = (h.yield>0?2.6:1.35) * (h.kind==='patient'?0.8:1);
+    if(pd<notice && pd>0.001){
+      const w=(notice-pd)/notice * (h.yield>0?2.4:1.25);
+      mvx += pdx/pd*w; mvy += pdy/pd*w;
+    }
+
+    const ml=Math.hypot(mvx,mvy);
+    if(ml>0.001){
+      const spd = h.base * (h.urgent?1.7:1) * (h.yield>0?1.25:1);
+      mvx=mvx/ml*spd; mvy=mvy/ml*spd;
+      h.dirx=mvx; h.diry=mvy; h.speed=spd;
+      const bx=h.x, by=h.y;
+      slideMove(h, mvx*dt, mvy*dt, h.rad);
+      const prog=Math.hypot(h.x-bx,h.y-by);
+      h.stuck = prog < spd*dt*0.35 ? h.stuck+dt : 0;
+      if(h.stuck>1.1){ h.path=null; h.stuck=0; h.wait=rnd(.2,.8); }
+    } else h.speed=0;
+
+    // collision with the robot — a loaded trolley sweeps a wider path
+    const rr=playerRadius()+h.rad;
+    if(pd < rr && h.hitCd<=0){
+      h.hitCd=2.2; onCollision(h, pd);
+    } else if(pd < rr+0.55 && h.missCd<=0 && player.speed>1.2){
+      h.missCd=2.5; nearMisses++;
+      if(Math.random()<0.35){ h.say=pick(['whoa','careful!','easy there','hm!']); h.sayT=1.4; }
+    }
+  }
+}
+
+function onCollision(h, pd){
+  collisions++;
+  time=Math.max(0, time-5);
+  player.stun=0.55; player.shake=1;
+  player.vx*=-0.5; player.vy*=-0.5;
+  sfxHit();
+  fadeEl.style.opacity='0.34';
+  setTimeout(()=>fadeEl.style.opacity='0',110);
+  h.say=pick(h.kind==='patient'
+    ? ['ow!','watch it!','oh my—','careful!']
+    : ['hey! watch it','robot! move','are you serious','ugh — again?','incident report!']);
+  h.sayT=2.2;
+  comfortHit(18, pick(['ow!','my hip!','oh — steady','honestly…']));
+  // push the human back out of the robot
+  const dx=h.x-player.x, dy=h.y-player.y, d=pd||0.01;
+  slideMove(h, dx/d*0.22, dy/d*0.22, h.rad);
+  toast('COLLISION with '+labelFor(h)+' — −5s'+(carrying()?' · patient jostled':''), 'bad');
+}
+function labelFor(h){
+  return {nurse:'a nurse',doctor:'a physician',surgeon:'a surgeon',
+          patient:'a patient',janitor:'housekeeping',visitor:'a visitor'}[h.kind]||'a human';
+}
+
+function updateTask(dt){
+  const need = task.phase==='pickup' ? 1.8 : 1.5;   // seconds to load / hand over
+  const d=Math.hypot(goal.x-player.x, goal.y-player.y);
+  if(d<1.25 && player.speed<0.9){
+    dwell += dt;
+    if(dwell>=need){
+      dwell=0;
+      if(task.phase==='pickup') loadPatient(); else dropPatient();
+    }
+  } else dwell=Math.max(0, dwell-dt*1.6);
+  document.getElementById('barf').style.width=(dwell/need*100)+'%';
+}
+
+function loadPatient(){
+  const i=humans.indexOf(task.patient);
+  if(i>=0) humans.splice(i,1);
+  task.phase='drop';
+  TEL.legEnd();
+  setTarget(task.dept.x, task.dept.y, task.dept.name, SPR.markerDrop);
+  TEL.legStart();
+  taskCard();
+  sfxDeliver();
+  const credit=DIFFS[difficulty].pickup;
+  time += credit;
+  toast(task.name+' aboard — to '+task.dept.name+'  +'+credit+'s','good');
+  patientSays(pick(['thank you','right then','gently, please','off we go']),3);
+}
+
+function dropPatient(){
+  transfers++;
+  const care = task.comfort;
+  careTotal += care;
+  TEL.legEnd(); TEL.comforts.push(Math.round(care));
+  const bonus = Math.round(DIFFS[difficulty].add * (0.60 + 0.40*care/100));
+  time += bonus;
+  sfxDeliver();
+  toast(task.name+' handed over at '+task.dept.name+
+        '  +'+bonus+'s · comfort '+Math.round(care)+'%', care>70?'good':'warn');
+  patientSays(care>75 ? pick(['smooth ride, thanks','very good, thank you'])
+                      : care>40 ? 'well… we made it'
+                      : pick(['never again','I want a different porter']), 3);
+  spawnCrowd(DIFFS[difficulty].spawn);
+  newTask(); TEL.legStart();
+  if(Math.random()<0.45) urgentRun();   // a stat call clears the corridor the hard way
+}
+
+function urgentRun(){
+  const cell=randomOpenCell();
+  const h=makeHuman(cell,{kind:'surgeon'});
+  h.urgent=true; humans.push(h);
+  const p=makeHuman(cell,{kind:'nurse'}); p.urgent=true; humans.push(p);
+  toast('Stat call — staff moving fast in the corridors','warn');
+}
+
+/* ================================================================ RENDERING */
+function resize(){
+  const dpr=Math.min(devicePixelRatio||1, 2);
+  const cw=Math.max(320, innerWidth||320), ch=Math.max(240, innerHeight||240);
+  RW = clamp(Math.round(cw/3.2), 260, 520);
+  RH = Math.round(RW * ch/cw);
+  if(!isFinite(RH)) RH=225;
+  RH = clamp(RH, 150, 340);
+  scene.width=RW; scene.height=RH;
+  img = sctx.createImageData(RW,RH);
+  buf = new Uint32Array(img.data.buffer);
+  zbuf = new Float32Array(RW);
+  VS = (RW/2)/PLANE;
+  hud.width=Math.round(cw*dpr); hud.height=Math.round(ch*dpr);
+  hctx.setTransform(dpr,0,0,dpr,0,0);
+  sctx.imageSmoothingEnabled=false;
+}
+addEventListener('resize',resize);
+
+function render(){
+  if(!buf || scene.width!==RW) resize();
+  const dirX=Math.cos(player.ang), dirY=Math.sin(player.ang);
+  const planeX=-dirY*PLANE, planeY=dirX*PLANE;
+  const shake = player.shake>0 ? Math.sin(performance.now()*0.06)*player.shake*7 : 0;
+  const bob = Math.sin(player.bob)*2.1*Math.min(1,player.speed*0.8);
+  const horizon = RH*0.5 + bob + shake;
+  const eye = EYE + Math.sin(player.bob*0.5)*0.012;
+
+  /* ---- floor & ceiling ------------------------------------------------- */
+  const rdx0=dirX-planeX, rdy0=dirY-planeY, rdx1=dirX+planeX, rdy1=dirY+planeY;
+  const fr=FOG[0], fg=FOG[1], fb=FOG[2];
+
+  for(let y=0;y<RH;y++){
+    const isFloor = y > horizon;
+    const p = isFloor ? (y-horizon) : (horizon-y);
+    if(p < 0.5){ // horizon band -> fog
+      const row=y*RW, c=pack(fr,fg,fb);
+      for(let x=0;x<RW;x++) buf[row+x]=c;
+      continue;
+    }
+    const dist = (isFloor ? eye : (WALL_H-eye)) * VS / p;
+    if(dist>34){ const row=y*RW, c=pack(fr,fg,fb); for(let x=0;x<RW;x++) buf[row+x]=c; continue; }
+    let fx = player.x + dist*rdx0, fy = player.y + dist*rdy0;
+    const stepX=(dist*rdx1 - dist*rdx0)/RW, stepY=(dist*rdy1 - dist*rdy0)/RW;
+    let f = 3.6/(dist+2.2); if(f>1) f=1;
+    const row=y*RW;
+    for(let x=0;x<RW;x++){
+      const cx=fx|0, cy=fy|0;
+      let t, ff=f;
+      if(cx<0||cy<0||cx>=MW||cy>=MH){ t=FTEX[FT_VINYL]; }
+      else if(isFloor){ t=FTEX[ftex[cy*MW+cx]]; }
+      else {
+        const ci=ctex[cy*MW+cx]; t=CTEX[ci];
+        if(ci===CT_LIGHT){ ff=Math.max(f,0.78); }
+      }
+      const tx=((fx-cx)*TS)&63, ty=((fy-cy)*TS)&63;
+      const c=t.px[(ty<<6)+tx];
+      const r=(c&255)*ff + fr*(1-ff);
+      const g=((c>>8)&255)*ff + fg*(1-ff);
+      const b=((c>>16)&255)*ff + fb*(1-ff);
+      buf[row+x]=(255<<24)|((b|0)<<16)|((g|0)<<8)|(r|0);
+      fx+=stepX; fy+=stepY;
+    }
+  }
+
+  /* ---- walls ----------------------------------------------------------- */
+  for(let x=0;x<RW;x++){
+    const camX = 2*x/RW - 1;
+    const rdx = dirX + planeX*camX, rdy = dirY + planeY*camX;
+    let mapX=player.x|0, mapY=player.y|0;
+    const ddx = rdx===0?1e30:Math.abs(1/rdx), ddy = rdy===0?1e30:Math.abs(1/rdy);
+    let stepX,stepY,sdx,sdy;
+    if(rdx<0){ stepX=-1; sdx=(player.x-mapX)*ddx; } else { stepX=1; sdx=(mapX+1-player.x)*ddx; }
+    if(rdy<0){ stepY=-1; sdy=(player.y-mapY)*ddy; } else { stepY=1; sdy=(mapY+1-player.y)*ddy; }
+    let side=0, hit=0, guard=0;
+    while(!hit && guard++<128){
+      if(sdx<sdy){ sdx+=ddx; mapX+=stepX; side=0; } else { sdy+=ddy; mapY+=stepY; side=1; }
+      if(mapX<0||mapY<0||mapX>=MW||mapY>=MH){ hit=2; break; }
+      if(grid[mapY*MW+mapX]) hit=1;
+    }
+    let dist = hit===1 ? (side===0 ? (sdx-ddx) : (sdy-ddy)) : 40;
+    if(dist<0.02) dist=0.02;
+    zbuf[x]=dist;
+    if(hit!==1) continue;
+
+    const t = TEX[wtex[mapY*MW+mapX]] || TEX[TX_WALL];
+    let wallX = side===0 ? player.y + dist*rdy : player.x + dist*rdx;
+    wallX -= Math.floor(wallX);
+    let texX = (wallX*TS)|0;
+    if((side===0 && rdx>0) || (side===1 && rdy<0)) texX = TS-texX-1;
+    texX &= 63;
+
+    const scale = VS/dist;
+    const yTop = horizon + (eye-WALL_H)*scale;
+    const yBot = horizon + eye*scale;
+    const h = yBot-yTop;
+    let y0=Math.ceil(yTop), y1=Math.floor(yBot);
+    if(y0<0) y0=0; if(y1>RH-1) y1=RH-1;
+
+    let f = 3.6/(dist+2.2); if(f>1) f=1;
+    if(side===1) f*=0.78;
+    const tStep = TS/h;
+    let tPos = (y0 - yTop)*tStep;
+    for(let y=y0;y<=y1;y++){
+      const ty=tPos|0; tPos+=tStep;
+      const c=t.px[((ty>63?63:ty<0?0:ty)<<6)+texX];
+      const r=(c&255)*f + fr*(1-f);
+      const g=((c>>8)&255)*f + fg*(1-f);
+      const b=((c>>16)&255)*f + fb*(1-f);
+      buf[y*RW+x]=(255<<24)|((b|0)<<16)|((g|0)<<8)|(r|0);
+    }
+  }
+
+  /* ---- sprites --------------------------------------------------------- */
+  const list=[];
+  for(const p of propList) list.push({s:p.s,x:p.x,y:p.y,h:p.h,base:p.base||0,glow:0});
+  for(const h of humans){
+    h._sx=undefined;
+    const bobY = h.speed>0.05 ? Math.abs(Math.sin(h.bob*2))*0.03 : 0;
+    list.push({s:h.spr,x:h.x,y:h.y,h:h.hgt+bobY,base:0,glow:0,ent:h});
+  }
+  if(marker) list.push({s:marker.spr, x:marker.x, y:marker.y, h:2.0, base:0,
+                        glow:0.55+0.45*Math.sin(performance.now()*0.005)});
+  for(const s of list){ const dx=s.x-player.x, dy=s.y-player.y; s.d=dx*dx+dy*dy; }
+  list.sort((a,b)=>b.d-a.d);
+
+  const invDet = 1/(planeX*dirY - dirX*planeY);
+  for(const s of list){
+    if(s.d>1200) continue;
+    const spx=s.x-player.x, spy=s.y-player.y;
+    const tX = invDet*(dirY*spx - dirX*spy);
+    const tY = invDet*(-planeY*spx + planeX*spy);
+    if(tY<0.12) continue;
+    const scale=VS/tY;
+    const scrX=(RW/2)*(1+tX/tY);
+    const hpx = s.h*scale;
+    const wpx = hpx*(s.s.w/s.s.h);
+    const yBot = horizon + (eye - (s.base||0))*scale;
+    const yTop = yBot - hpx;
+    let x0=Math.ceil(scrX-wpx/2), x1=Math.floor(scrX+wpx/2);
+    let y0=Math.ceil(yTop), y1=Math.floor(yBot);
+    if(x1<0||x0>=RW||y1<0||y0>=RH) continue;
+    const cx0=Math.max(0,x0), cx1=Math.min(RW-1,x1);
+    const cy0=Math.max(0,y0), cy1=Math.min(RH-1,y1);
+    let f = 3.6/(Math.sqrt(s.d)+2.2); if(f>1) f=1;
+    if(s.glow) f=Math.max(f, s.glow);
+    const sw=s.s.w, sh=s.s.h, px=s.s.px;
+    const txStep = sw/(x1-x0+1), tyStep = sh/(y1-y0+1);
+    for(let x=cx0;x<=cx1;x++){
+      if(tY >= zbuf[x]) continue;
+      const tx=((x-x0)*txStep)|0;
+      if(tx<0||tx>=sw) continue;
+      for(let y=cy0;y<=cy1;y++){
+        const ty=((y-y0)*tyStep)|0;
+        if(ty<0||ty>=sh) continue;
+        const c=px[ty*sw+tx];
+        const a=c>>>24;
+        if(a<10) continue;
+        let r=(c&255)*f + fr*(1-f);
+        let g=((c>>8)&255)*f + fg*(1-f);
+        let b=((c>>16)&255)*f + fb*(1-f);
+        if(a<250){                                  // translucent: blend with what's behind
+          const d=buf[y*RW+x], k=a/255, ik=1-k;
+          r=r*k + (d&255)*ik; g=g*k + ((d>>8)&255)*ik; b=b*k + ((d>>16)&255)*ik;
+        }
+        buf[y*RW+x]=(255<<24)|((b|0)<<16)|((g|0)<<8)|(r|0);
+      }
+    }
+    if(s.ent) { s.ent._sx=scrX; s.ent._sy=yTop; s.ent._sc=scale; }
+  }
+
+  sctx.putImageData(img,0,0);
+}
+
+/* ==================================================================== HUD */
+function drawHUD(){
+  const W=Math.max(320, innerWidth||320), H=Math.max(240, innerHeight||240);
+  hctx.clearRect(0,0,W,H);
+
+  // vignette
+  const vg=hctx.createRadialGradient(W/2,H/2,Math.min(W,H)*0.35,W/2,H/2,Math.max(W,H)*0.72);
+  vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(1,'rgba(0,0,0,.55)');
+  hctx.fillStyle=vg; hctx.fillRect(0,0,W,H);
+
+  if(state!=='play' && state!=='pause') return;
+
+  // ---- speech bubbles
+  const sx=W/RW, sy=H/RH;
+  hctx.textAlign='center'; hctx.font='600 12px ui-monospace,monospace';
+  for(const hm of humans){
+    if(hm.sayT>0 && hm._sx!==undefined){
+      const x=hm._sx*sx, y=hm._sy*sy - 8;
+      if(x<-60||x>W+60||y<0||y>H) continue;
+      const tw=hctx.measureText(hm.say).width+16;
+      const a=clamp(hm.sayT,0,1);
+      hctx.globalAlpha=a;
+      hctx.fillStyle='rgba(14,20,28,.9)'; hctx.strokeStyle='rgba(125,220,255,.35)';
+      roundRect(hctx,x-tw/2,y-20,tw,20,6); hctx.fill(); hctx.stroke();
+      hctx.fillStyle='#dce8f2'; hctx.fillText(hm.say,x,y-6);
+      hctx.globalAlpha=1;
+    }
+  }
+
+  // ---- robot chassis (cargo deck)
+  drawChassis(W,H);
+
+  // ---- goal direction arrow
+  const gdx=goal.x-player.x, gdy=goal.y-player.y;
+  const ga=Math.atan2(gdy,gdx)-player.ang;
+  const rel=Math.atan2(Math.sin(ga),Math.cos(ga));
+  const cxp=W/2, cyp=H*0.13;
+  const off=clamp(rel/(FOV/2), -1.35, 1.35)*(W*0.36);
+  hctx.save();
+  hctx.translate(cxp+off, cyp);
+  const behind=Math.abs(rel)>FOV/2;
+  hctx.rotate(behind ? (rel>0? Math.PI/2 : -Math.PI/2) : 0);
+  hctx.fillStyle=behind?'rgba(255,204,102,.85)':'rgba(125,220,255,.9)';
+  hctx.beginPath(); hctx.moveTo(0,-9); hctx.lineTo(9,7); hctx.lineTo(-9,7); hctx.closePath(); hctx.fill();
+  hctx.restore();
+
+  // ---- proximity radar (bottom-left)
+  drawRadar(W,H);
+
+  // ---- top-down tactical view
+  if(topView) drawTopView(W,H);
+
+  // ---- chirp cooldown pip
+  hctx.textAlign='center'; hctx.font='11px ui-monospace,monospace';
+  hctx.fillStyle= chirpCd>0 ? 'rgba(125,140,155,.6)' : 'rgba(125,220,255,.9)';
+  hctx.fillText(chirpCd>0? 'SPACE  ▮ recharging' : 'SPACE  ◉ announce', W/2, H-16);
+}
+
+function roundRect(c,x,y,w,h,r){
+  c.beginPath();
+  c.moveTo(x+r,y); c.arcTo(x+w,y,x+w,y+h,r); c.arcTo(x+w,y+h,x,y+h,r);
+  c.arcTo(x,y+h,x,y,r); c.arcTo(x,y,x+w,y,r); c.closePath();
+}
+
+function drawChassis(W,H){
+  const deckH=Math.min(200, H*0.30), y=H-deckH;
+  const sway=Math.sin(player.bob)*3*Math.min(1,player.speed*0.8);
+  const roll=Math.sin(player.bob*0.5)*0.012*Math.min(1,player.speed*0.7);
+  const carry=carrying();
+  hctx.save(); hctx.translate(0, sway);
+
+  // whatever the porter is pushing, drawn receding away from the camera
+  hctx.save(); hctx.translate(W/2,H); hctx.rotate(roll); hctx.translate(-W/2,-H);
+  const f={cx:W/2, topY:y-deckH*0.24, botY:H+30, topHalf:W*0.150, botHalf:W*0.330};
+  if(carry && task.mobility==='chair') drawWheelchair(f,W,H);
+  else if(carry)                       drawTrolley(f,W,H);
+  else                                 drawEmptyTrolley(f,W,H);
+  hctx.restore();
+
+  // the robot's own handlebar deck, closest to the camera
+  const g=hctx.createLinearGradient(0,H-deckH*0.22,0,H);
+  g.addColorStop(0,'#20303c'); g.addColorStop(1,'#0b1219');
+  hctx.fillStyle=g;
+  hctx.beginPath();
+  hctx.moveTo(0,H+10); hctx.lineTo(W*0.13,H-deckH*0.22);
+  hctx.lineTo(W*0.87,H-deckH*0.22); hctx.lineTo(W,H+10);
+  hctx.closePath(); hctx.fill();
+  hctx.strokeStyle='rgba(125,220,255,.20)'; hctx.lineWidth=2; hctx.stroke();
+
+  const lit = nearestDist<0.95 ? '#ff6b6b' : nearestDist<1.9 ? '#ffcc66' : '#5ce39a';
+  for(let i=0;i<3;i++){
+    hctx.fillStyle = i===0?lit : 'rgba(125,220,255,'+(0.25+0.25*Math.sin(performance.now()*0.004+i))+')';
+    hctx.beginPath(); hctx.arc(W*0.17+i*15, H-deckH*0.18, 4.5, 0, 6.29); hctx.fill();
+  }
+
+  // what the passenger has to say about your driving
+  if(carry && patientSayT>0){
+    hctx.globalAlpha=clamp(patientSayT,0,1);
+    hctx.textAlign='center'; hctx.font='600 13px ui-monospace,monospace';
+    const tw=hctx.measureText(patientSay).width+20;
+    const by=f.topY-48;                       // sits clear above the passenger's head
+    hctx.fillStyle='rgba(14,20,28,.92)'; hctx.strokeStyle='rgba(255,204,102,.45)';
+    roundRect(hctx, W/2-tw/2, by, tw, 24, 7); hctx.fill(); hctx.stroke();
+    hctx.fillStyle='#ffeec9'; hctx.fillText(patientSay, W/2, by+17);
+    hctx.globalAlpha=1;
+  }
+  hctx.restore();
+}
+
+/* a trapezoid that recedes from the camera: wide at the bottom, narrow at the far end */
+function slab(f,t0,t1,inset,fill){
+  const L=f.botY-f.topY;
+  const y0=f.topY+L*t0, y1=f.topY+L*t1;
+  const h0=lerp(f.topHalf,f.botHalf,t0)-inset, h1=lerp(f.topHalf,f.botHalf,t1)-inset;
+  hctx.beginPath();
+  hctx.moveTo(f.cx-h0,y0); hctx.lineTo(f.cx+h0,y0);
+  hctx.lineTo(f.cx+h1,y1); hctx.lineTo(f.cx-h1,y1);
+  hctx.closePath(); hctx.fillStyle=fill; hctx.fill();
+}
+function siderails(f){
+  const L=f.botY-f.topY;
+  hctx.lineCap='round';
+  for(const s of [-1,1]){
+    hctx.strokeStyle='#9fadb6'; hctx.lineWidth=6;
+    hctx.beginPath();
+    hctx.moveTo(f.cx+s*(f.topHalf+6), f.topY+L*0.06);
+    hctx.lineTo(f.cx+s*(f.botHalf+10), f.botY);
+    hctx.stroke();
+    hctx.strokeStyle='rgba(255,255,255,.28)'; hctx.lineWidth=1.6;
+    hctx.beginPath();
+    hctx.moveTo(f.cx+s*(f.topHalf+6), f.topY+L*0.06-2);
+    hctx.lineTo(f.cx+s*(f.botHalf+10), f.botY-3);
+    hctx.stroke();
+  }
+}
+function drawEmptyTrolley(f,W,H){
+  slab(f,0,1,0,'#33414c');
+  slab(f,0.03,1,7,'#c8d2d8');
+  siderails(f);
+  hctx.fillStyle='rgba(60,74,88,.85)'; hctx.font='11px ui-monospace,monospace'; hctx.textAlign='center';
+  hctx.fillText('TROLLEY EMPTY', f.cx, f.topY+(f.botY-f.topY)*0.32);
+}
+function drawTrolley(f,W,H){
+  const L=f.botY-f.topY;
+  slab(f,0,1,0,'#33414c');                       // frame
+  slab(f,0.03,1,7,'#e7edf1');                    // sheet
+  // blanket from mid-body to the near end
+  slab(f,0.30,1,11,'#4d6f86');
+  hctx.fillStyle='rgba(255,255,255,.10)';
+  slab(f,0.30,0.34,11,'rgba(255,255,255,.14)');
+  // pillow and head at the far end
+  const hy=f.topY+L*0.09, hr=f.topHalf*0.42;
+  hctx.fillStyle='#f4f8fb';
+  roundRect(hctx, f.cx-f.topHalf*0.80, f.topY+L*0.02, f.topHalf*1.60, L*0.15, 8); hctx.fill();
+  hctx.fillStyle=task.skin;
+  hctx.beginPath(); hctx.ellipse(f.cx, hy, hr, hr*0.92, 0, 0, 6.29); hctx.fill();
+  hctx.fillStyle=task.hair;
+  hctx.beginPath(); hctx.ellipse(f.cx, hy-hr*0.55, hr*1.04, hr*0.6, 0, 0, 6.29); hctx.fill();
+  hctx.fillStyle='#20242b';
+  const eh = task.comfort<45 ? 1.6 : 3.2;        // a wince when the ride gets rough
+  hctx.fillRect(f.cx-hr*0.52, hy-1, hr*0.34, eh);
+  hctx.fillRect(f.cx+hr*0.18, hy-1, hr*0.34, eh);
+  // arms resting on top of the blanket
+  hctx.fillStyle=task.skin;
+  for(const s of [-1,1]){
+    const w=lerp(f.topHalf,f.botHalf,0.42)-18;
+    hctx.beginPath();
+    hctx.moveTo(f.cx+s*(w-9), f.topY+L*0.29);
+    hctx.lineTo(f.cx+s*w,     f.topY+L*0.29);
+    hctx.lineTo(f.cx+s*(w+5), f.topY+L*0.52);
+    hctx.lineTo(f.cx+s*(w-5), f.topY+L*0.52);
+    hctx.closePath(); hctx.fill();
+  }
+  siderails(f);
+  // IV pole on the left, running up out of frame
+  hctx.strokeStyle='#9fadb6'; hctx.lineWidth=5;
+  hctx.beginPath(); hctx.moveTo(f.cx-f.topHalf-18, f.topY-40); hctx.lineTo(f.cx-f.botHalf-18, f.botY); hctx.stroke();
+  hctx.fillStyle='rgba(196,230,244,.9)';
+  roundRect(hctx, f.cx-f.topHalf-34, f.topY-96, 26, 52, 5); hctx.fill();
+  hctx.fillStyle='rgba(150,205,235,.95)';
+  roundRect(hctx, f.cx-f.topHalf-34, f.topY-66, 26, 22, 5); hctx.fill();
+}
+function drawWheelchair(f,W,H){
+  const L=f.botY-f.topY, cx=f.cx;
+  const seatTop=f.topY+L*0.34;
+  // wheels either side, seen from behind
+  hctx.strokeStyle='#1b2229'; hctx.lineWidth=9;
+  for(const s of [-1,1]){
+    hctx.beginPath();
+    hctx.arc(cx+s*f.botHalf*0.92, f.botY-L*0.06, L*0.46, Math.PI*1.08, Math.PI*1.92);
+    hctx.stroke();
+  }
+  // chair back
+  hctx.fillStyle='#2b3644';
+  roundRect(hctx, cx-f.topHalf*1.5, seatTop, f.topHalf*3, L*0.66, 14); hctx.fill();
+  hctx.fillStyle='rgba(255,255,255,.07)'; hctx.fillRect(cx-f.topHalf*1.5, seatTop, f.topHalf*3, 7);
+  // push handles
+  hctx.strokeStyle='#9fadb6'; hctx.lineWidth=7; hctx.lineCap='round';
+  for(const s of [-1,1]){
+    hctx.beginPath();
+    hctx.moveTo(cx+s*f.topHalf*1.45, seatTop+8);
+    hctx.lineTo(cx+s*f.botHalf*0.98, f.botY-L*0.10);
+    hctx.stroke();
+  }
+  // the passenger: shoulders above the backrest, head above that
+  const hr=f.topHalf*0.52;
+  hctx.fillStyle='#cfe3ea';
+  roundRect(hctx, cx-f.topHalf*1.15, seatTop-L*0.14, f.topHalf*2.3, L*0.22, 18); hctx.fill();
+  hctx.fillStyle=task.skin;
+  hctx.beginPath(); hctx.ellipse(cx, seatTop-L*0.20, hr, hr*0.95, 0, 0, 6.29); hctx.fill();
+  hctx.fillStyle=task.hair;
+  hctx.beginPath(); hctx.ellipse(cx, seatTop-L*0.245, hr*1.02, hr*0.60, 0, 0, 6.29); hctx.fill();
+  if(task.comfort<45){                       // gripping the armrests
+    hctx.fillStyle=task.skin;
+    roundRect(hctx, cx-f.topHalf*1.58, seatTop+L*0.20, f.topHalf*0.30, L*0.055, 4); hctx.fill();
+    roundRect(hctx, cx+f.topHalf*1.28, seatTop+L*0.20, f.topHalf*0.30, L*0.055, 4); hctx.fill();
+  }
+}
+
+function drawRadar(W,H){
+  const R=Math.min(94, H*0.14), cx=24+R, cy=H-24-R;
+  hctx.save();
+  hctx.globalAlpha=.94;
+  hctx.fillStyle='rgba(11,16,22,.86)'; hctx.strokeStyle='rgba(34,48,63,1)'; hctx.lineWidth=1;
+  hctx.beginPath(); hctx.arc(cx,cy,R,0,6.29); hctx.fill(); hctx.stroke();
+  hctx.save(); hctx.beginPath(); hctx.arc(cx,cy,R-1,0,6.29); hctx.clip();
+  const range=9; const k=(R-6)/range;
+  // walls near by
+  const px=player.x, py=player.y;
+  for(let y=Math.floor(py-range);y<=py+range;y++)for(let x=Math.floor(px-range);x<=px+range;x++){
+    if(!isWall(x,y)) continue;
+    const rx=(x+0.5-px), ry=(y+0.5-py);
+    const a=-player.ang-Math.PI/2;
+    const tx= rx*Math.cos(a)-ry*Math.sin(a), ty= rx*Math.sin(a)+ry*Math.cos(a);
+    hctx.fillStyle='rgba(60,86,110,.55)';
+    hctx.fillRect(cx+tx*k-k/2, cy+ty*k-k/2, k, k);
+  }
+  // sweep
+  hctx.strokeStyle='rgba(125,220,255,.18)';
+  for(let i=1;i<=3;i++){ hctx.beginPath(); hctx.arc(cx,cy,(R-6)*i/3,0,6.29); hctx.stroke(); }
+  // humans
+  for(const h of humans){
+    const rx=h.x-px, ry=h.y-py; const d=Math.hypot(rx,ry);
+    if(d>range) continue;
+    const a=-player.ang-Math.PI/2;
+    const tx= rx*Math.cos(a)-ry*Math.sin(a), ty= rx*Math.sin(a)+ry*Math.cos(a);
+    hctx.fillStyle = d<0.95?'#ff6b6b' : d<2.0?'#ffcc66' : '#7ddcff';
+    hctx.beginPath(); hctx.arc(cx+tx*k, cy+ty*k, d<2?3.6:2.8, 0, 6.29); hctx.fill();
+  }
+  // goal bearing
+  const gx=goal.x-px, gy=goal.y-py;
+  const a=-player.ang-Math.PI/2;
+  let tx= gx*Math.cos(a)-gy*Math.sin(a), ty= gx*Math.sin(a)+gy*Math.cos(a);
+  const gl=Math.hypot(tx,ty)||1; const clampL=Math.min(gl, range*0.94);
+  tx=tx/gl*clampL; ty=ty/gl*clampL;
+  hctx.fillStyle='#5ce39a';
+  hctx.beginPath(); hctx.arc(cx+tx*k, cy+ty*k, 3.4, 0, 6.29); hctx.fill();
+  // robot
+  hctx.fillStyle='#e6edf5';
+  hctx.beginPath(); hctx.moveTo(cx,cy-6); hctx.lineTo(cx+5,cy+5); hctx.lineTo(cx-5,cy+5); hctx.closePath(); hctx.fill();
+  hctx.restore();
+  hctx.fillStyle='rgba(125,139,156,.8)'; hctx.font='9px ui-monospace,monospace'; hctx.textAlign='left';
+  hctx.fillText('PROXIMITY '+(range*M_PER_CELL).toFixed(0)+'m', cx-R+4, cy+R-6);
+  hctx.restore();
+}
+
+function drawTopView(W,H){
+  hctx.save();
+  hctx.fillStyle='rgba(5,8,11,.90)'; hctx.fillRect(0,0,W,H);
+  const k=Math.min((W*0.9)/MW,(H*0.82)/MH);
+  const ox=(W-MW*k)/2, oy=(H-MH*k)/2;
+  for(let y=0;y<MH;y++)for(let x=0;x<MW;x++){
+    const i=idx(x,y);
+    if(grid[i]) { hctx.fillStyle='#243444'; hctx.fillRect(ox+x*k,oy+y*k,k,k); }
+    else { hctx.fillStyle= ftex[i]===FT_CARPET?'#141d24':'#0e161d'; hctx.fillRect(ox+x*k,oy+y*k,k,k); }
+  }
+  for(const p of propList){ hctx.fillStyle='rgba(90,110,130,.5)';
+    hctx.fillRect(ox+(p.x-p.r)*k, oy+(p.y-p.r)*k, p.r*2*k, p.r*2*k); }
+  for(const h of humans){
+    hctx.fillStyle = h.kind==='patient'?'#cfe3ea' : h.kind==='doctor'?'#f2f6f8' : h.kind==='nurse'?'#2f8f8a':'#8e7bb0';
+    hctx.beginPath(); hctx.arc(ox+h.x*k, oy+h.y*k, k*0.34, 0, 6.29); hctx.fill();
+  }
+  hctx.fillStyle='#5ce39a';
+  hctx.beginPath(); hctx.arc(ox+goal.x*k, oy+goal.y*k, k*0.6, 0, 6.29); hctx.fill();
+  hctx.fillStyle='#7ddcff';
+  hctx.save(); hctx.translate(ox+player.x*k, oy+player.y*k); hctx.rotate(player.ang);
+  hctx.beginPath(); hctx.moveTo(k*0.8,0); hctx.lineTo(-k*0.5,k*0.5); hctx.lineTo(-k*0.5,-k*0.5);
+  hctx.closePath(); hctx.fill(); hctx.restore();
+  hctx.fillStyle='rgba(230,237,245,.9)'; hctx.font='12px ui-monospace,monospace'; hctx.textAlign='center';
+  hctx.fillText('TACTICAL VIEW · release TAB', W/2, oy+MH*k+22);
+  hctx.restore();
+}
+
+/* --------------------------------------------------------------- DOM panel */
+const el={
+  del:document.getElementById('v-del'), dist:document.getElementById('v-dist'),
+  distK:document.getElementById('k-dist'), com:document.getElementById('v-com'),
+  near:document.getElementById('v-near'), spd:document.getElementById('v-spd'),
+  nm:document.getElementById('v-nm'), col:document.getElementById('v-col'),
+  head:document.getElementById('telhead'), tel:document.getElementById('tel'),
+  clock:document.getElementById('tclock'), clockBox:document.getElementById('clock')
+};
+let uiT=0;
+function updatePanels(dt){
+  uiT+=dt; if(uiT<0.08) return; uiT=0;
+  const gd=Math.hypot(goal.x-player.x,goal.y-player.y)*M_PER_CELL;
+  const nd=nearestDist*M_PER_CELL;
+  el.del.textContent=transfers;
+  el.distK.textContent = task.phase==='pickup' ? 'dist to patient' : 'dist to '+task.dept.name.split(' ')[0].toLowerCase();
+  el.dist.textContent=gd.toFixed(1)+' m';
+  if(carrying()){
+    const c=Math.round(task.comfort);
+    el.com.textContent=c+'%';
+    el.com.className='v '+(c<40?'bad':c<75?'warn':'good');
+  } else { el.com.textContent='—'; el.com.className='v'; }
+  el.near.textContent= nearestDist>20 ? '— m' : nd.toFixed(2)+' m';
+  el.near.className='v '+(nd<0.9?'bad':nd<2.0?'warn':'good');
+  el.spd.textContent=(player.speed*M_PER_CELL).toFixed(1)+' m/s';
+  el.nm.textContent=nearMisses; el.nm.className='v '+(nearMisses>0?'warn':'');
+  el.col.textContent=collisions; el.col.className='v '+(collisions>0?'bad':'');
+  const st = player.stun>0 ? 'hit' : nd<1.4 ? 'caution' : '';
+  el.tel.className = 'panel '+st;
+  el.head.textContent = st==='hit' ? 'CONTACT' : st==='caution' ? 'CAUTION · YIELD'
+                      : carrying() ? 'PATIENT ABOARD' : 'CLEAR';
+  const m=Math.floor(Math.max(0,time)/60), s=Math.floor(Math.max(0,time)%60);
+  el.clock.textContent=m+':'+String(s).padStart(2,'0');
+  el.clockBox.className='panel'+(time<20?' low':'');
+}
+
+/* ==================================================================== FLOW */
+function menuCard(){
+  cardEl.innerHTML=`
+    <h1>WARD <span>RUNNER</span></h1>
+    <div class="tag">You are the hospital's porter robot. Collect patients from their rooms, wheel them to
+      the right department — and get them there without touching a single person on the way.</div>
+    <div class="keys">
+      <b>W A S D</b><span>drive · mouse to look (click to capture)</span>
+      <b>SHIFT</b><span>boost — faster, rougher on your passenger</span>
+      <b>SPACE / E</b><span>announce “excuse me” — people step aside</span>
+      <b>TAB</b><span>hold for the tactical top-down view</span>
+      <b>ESC</b><span>pause · <b>R</b> restart</span>
+      <b>← →</b><span>turn, if you'd rather not use the mouse</span>
+    </div>
+    <div class="diffs" id="diffs">
+      ${Object.entries(DIFFS).map(([k,v])=>`
+        <div class="diff${k===difficulty?' sel':''}" data-k="${k}">
+          <div class="n">${v.label}</div>
+          <div class="d">${v.people} people · ${v.time}s on the clock</div>
+        </div>`).join('')}
+    </div>
+    <button class="btn" id="start">Start shift</button>
+    <div class="hint">Each completed transfer buys you more time — more of it the smoother the ride.
+      Collisions cost 5 seconds, and your passenger keeps score too.
+      Everything on this ward moves fast; the clock is short on purpose.</div>`;
+  cardEl.querySelectorAll('.diff').forEach(d=>d.onclick=()=>{
+    difficulty=d.dataset.k;
+    cardEl.querySelectorAll('.diff').forEach(x=>x.classList.toggle('sel',x===d));
+  });
+  document.getElementById('start').onclick=startGame;
+  overlay.classList.remove('hidden');
+}
+function pauseCard(){
+  cardEl.innerHTML=`
+    <h1>Shift <span>paused</span></h1>
+    <div class="tag">${task.phase==='pickup'
+        ? task.name+' is still waiting in Room '+task.room.num+'.'
+        : task.name+' is on your trolley, bound for '+task.dept.name+'.'}</div>
+    <div class="stats">
+      <div><span class="k">transfers</span><span>${transfers}</span></div>
+      <div><span class="k">collisions</span><span>${collisions}</span></div>
+      <div><span class="k">near-misses</span><span>${nearMisses}</span></div>
+      <div><span class="k">time left</span><span>${Math.max(0,time).toFixed(0)}s</span></div>
+    </div>
+    <button class="btn" id="resume">Resume</button>
+    <button class="btn ghost" id="quit">Abandon shift</button>`;
+  document.getElementById('resume').onclick=()=>{ state='play'; overlay.classList.add('hidden'); grabMouse(); };
+  document.getElementById('quit').onclick=()=>{ state='menu'; menuCard(); };
+  overlay.classList.remove('hidden');
+}
+function overCard(){
+  const care = transfers ? Math.round(careTotal/transfers) : 0;
+  const rating = collisions===0 && care>85 ? 'The ward would like to keep you.'
+    : collisions<=2 && care>60 ? 'Solid portering. One or two apologies owed.'
+    : collisions<=5 ? 'Maintenance has questions about your bumpers.'
+    : 'You are being reassigned to the laundry basement.';
+  const R=TEL.report();
+  const row=(k,v,note)=>`<div class="drow"><span class="dk">${k}</span><span class="dv">${v}</span><span class="dn">${note}</span></div>`;
+  const n=(v,suffix)=> v===null||v===undefined ? '—' : v+(suffix||'');
+  const sd=R.navigation.mean_speed_by_density_ms;
+  const adapt = (sd.none!==null && sd.heavy!==null)
+      ? sd.none.toFixed(1)+' → '+sd.heavy.toFixed(1)+' m/s'
+      : (sd.none!==null? sd.none.toFixed(1)+' m/s (no dense crowd met)' : '—');
+
+  cardEl.innerHTML=`
+    <h1>Shift <span>over</span></h1>
+    <div class="tag">${rating}</div>
+    <div class="stats">
+      <div><span class="k">patients moved</span><span>${transfers}</span></div>
+      <div><span class="k">avg comfort</span><span>${transfers?care+'%':'—'}</span></div>
+      <div><span class="k">collisions</span><span>${collisions}</span></div>
+      <div><span class="k">near-misses</span><span>${nearMisses}</span></div>
+      <div><span class="k">distance driven</span><span>${R.distance_m} m</span></div>
+      <div><span class="k">difficulty</span><span>${DIFFS[difficulty].label}</span></div>
+    </div>
+
+    <div class="dhead">Shift data capture
+      <em>${R.trajectory_5hz.length} trajectory samples · ${R.duration_s}s · ${R.encounters} human encounters</em></div>
+    <div class="dnote">Simulated numbers, real schema: these are the metrics a physical robot
+      deployed in a hospital would be logging, and each one feeds a specific part of the stack.</div>
+
+    <div class="dgroup">Safety &amp; social navigation</div>
+    ${row('collisions / 100 m', n(R.collisions_per_100m), 'core safety KPI for fleet release gates')}
+    ${row('near-misses / 100 m', n(R.near_misses_per_100m), 'leading indicator — fires long before contact does')}
+    ${row('closing TTC &lt; 1.5 s / 100 m', n(R.ttc_under_1s5_per_100m), 'triggers speed-limiter and emergency-stop tuning')}
+    ${row('minimum clearance', n(R.min_clearance_m,' m'), 'sets the hard safety envelope in the planner')}
+    ${row('encounter clearance p05 / median', n(R.encounter_clearance_p05_m,' m')+' / '+n(R.encounter_clearance_median_m,' m'),
+          'distribution, not worst case — what audits actually ask for')}
+    ${row('time in personal space', n(R.personal_space_time_pct,'%'),
+          'proxemic compliance (Hall zones): the social-acceptance metric')}
+    ${row('blind-corner appearances', n(R.blind_corner_appearances),
+          'sizes sensor FOV and the occlusion-aware slowdown policy')}
+
+    <div class="dgroup">Human interaction</div>
+    ${row('intent signals issued', n(R.intent_signals.issued), 'how often the robot had to announce itself')}
+    ${row('human yield rate', n(R.intent_signals.yield_rate===null?null:Math.round(R.intent_signals.yield_rate*100),'%'),
+          'does signalling actually change behaviour? drives HRI design')}
+    ${row('speed vs crowd density', adapt,
+          'the speed-adaptation curve — transfers directly to a real velocity policy')}
+    ${row('mean people within 3 m', n(R.navigation.mean_crowd_density_within_3m),
+          'characterises the deployment environment for sim-to-real')}
+
+    <div class="dgroup">Payload &amp; ride quality</div>
+    ${row('peak lateral acceleration', n(R.ride_quality.peak_lateral_accel_ms2,' m/s²'),
+          'ISO 2631 ride comfort, 0.15 s window — the limit for carrying a person')}
+    ${row('RMS lateral acceleration', n(R.ride_quality.rms_lateral_accel_ms2,' m/s²'), 'sustained discomfort, not just spikes')}
+    ${row('trolley scrapes', n(R.ride_quality.obstruction_jolts),
+          'loaded contact with walls and doorframes — clearance margins at chokepoints')}
+    ${row('mean comfort score', n(R.ride_quality.mean_comfort_pct,'%'), 'the outcome measure the ward would sign off on')}
+
+    <div class="dgroup">Autonomy robustness</div>
+    ${row('path efficiency', n(R.navigation.path_efficiency===null?null:Math.min(100,Math.round(R.navigation.path_efficiency*100)),'%'),
+          'driven distance vs shortest path — planner quality')}
+    ${row('doorway traversals', n(R.navigation.doorway_traversals), 'the manoeuvre that fails most often in the field')}
+    ${row('recovery manoeuvres', n(R.navigation.recovery_manoeuvres),
+          'wedge-and-recover events — the top cause of real intervention calls')}
+
+    <button class="btn" id="again">Run it back</button>
+    <button class="btn ghost" id="dl">Download run log (JSON)</button>
+    <button class="btn ghost" id="menu">Menu</button>`;
+  document.getElementById('again').onclick=startGame;
+  document.getElementById('menu').onclick=()=>{ state='menu'; menuCard(); };
+  document.getElementById('dl').onclick=downloadRunLog;
+  overlay.classList.remove('hidden');
+  cardEl.scrollTop=0;
+}
+
+function downloadRunLog(){
+  const blob=new Blob([JSON.stringify(TEL.report(),null,2)],{type:'application/json'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='ward-runner-shift-'+new Date().toISOString().replace(/[:.]/g,'-')+'.json';
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+}
+function startGame(){
+  audio(); resetGame(); state='play'; overlay.classList.add('hidden');
+  grabMouse();
+}
+function pauseGame(){
+  if(state!=='play') return;
+  state='pause'; pauseCard();
+  if(document.pointerLockElement) document.exitPointerLock();
+}
+function endGame(){
+  state='over'; sfxEnd(); overCard();
+  if(document.pointerLockElement) document.exitPointerLock();
+}
+
+/* ==================================================================== LOOP */
+let last=performance.now();
+function loop(now){
+  requestAnimationFrame(loop);
+  let dt=(now-last)/1000; last=now;
+  if(dt>0.1) dt=0.1;
+
+  if(state==='play'){
+    updatePlayer(dt);
+    updateHumans(dt);
+    updateTask(dt);
+    TEL.sample(dt);
+    time-=dt; elapsed+=dt;
+    // proximity beeps
+    if(nearestDist<2.6){
+      beepCd-=dt;
+      if(beepCd<=0){ sfxBeep(clamp(1-nearestDist/2.6,0,1)); beepCd=clamp(nearestDist*0.30,0.08,0.7); }
+    }
+    updatePanels(dt);
+    if(time<=0){ time=0; endGame(); }
+  }
+  render();
+  drawHUD();
+}
+
+/* =================================================================== BOOT */
+buildTextures();
+buildSprites();
+buildMap();
+resize();
+newTask();
+menuCard();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
