@@ -376,7 +376,16 @@ function reset() {
   document.getElementById('over').style.display = 'none';
 }
 
-const $ = id => document.getElementById(id);
+// Looking up an element that no longer exists used to return null, so assigning
+// .onclick threw and silently killed EVERY handler declared after it, leaving a
+// page where no button worked and the console stayed clean. That has cost two
+// debugging sessions, so a missing id now warns and returns a harmless stub.
+const MISSING_EL = () => ({
+  style: {}, classList: { toggle() {}, add() {}, remove() {} },
+  onclick: null, textContent: '', innerHTML: '', click() {},
+});
+const $ = id => document.getElementById(id) ||
+  (console.warn('[ui] no element #' + id), MISSING_EL());
 const clock = new THREE.Clock();
 
 function loop() {
@@ -755,7 +764,6 @@ $('bPrimary').onclick = () => {
   } else if (p.cue === 'study') $('bStudy').click();
 };
 $('bDriveMe').onclick = () => takeTheWheel();
-$('bRestart').onclick = () => reset();
 $('bTrain').onclick = trainNow;
 $('bData').onclick = () => Telemetry.download();
 
